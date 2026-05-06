@@ -210,7 +210,7 @@ trivial (`.update.previousVersion`).
 ### 3. Environment fingerprint, not OCI digest
 
 Originally the schema recorded image digests. Investigation in
-`../../../docs/reproducible-builds.md` showed that apt-internal
+`../cargo/reproducible-builds.md` showed that apt-internal
 non-determinism jitters OCI layers by ~tens of bytes per `RUN` even
 with pinned `SOURCE_DATE_EPOCH` + snapshot. The v0.0.3 pivot replaced
 "image digests match" with "environment fingerprint matches" as the

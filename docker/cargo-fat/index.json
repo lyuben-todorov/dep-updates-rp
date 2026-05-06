@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1.0",
-  "description": "Manifest of fat toolchain images known to this repo. Each entry records the inputs needed to rebuild the image byte-identically (modulo apt-layer jitter \u2014 see docs/reproducible-builds.md) and the environment fingerprint a consumer can verify against. The index is a *manifest of what exists*, not a policy file; new images are registered here after being built.",
+  "description": "Manifest of fat toolchain images known to this repo. Each entry records the inputs needed to rebuild the image byte-identically (modulo apt-layer jitter \u2014 see docs/cargo/reproducible-builds.md) and the environment fingerprint a consumer can verify against. The index is a *manifest of what exists*, not a policy file; new images are registered here after being built.",
   "fatImages": [
     {
       "tag": "rp2026/cargo-fat:1.92.0-bookworm-20260415",

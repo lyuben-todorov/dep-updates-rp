@@ -22,7 +22,7 @@ Given a v0.0.4 entry JSON, this script:
      entry back.
 
 The `fatImage.expectedDigest` field is ADVISORY per Fork B (see
-../../../docs/reproducible-builds.md): mismatches are warnings, not
+../../docs/cargo/reproducible-builds.md): mismatches are warnings, not
 errors, because apt layer bytes can jitter across rebuilds even with
 pinned inputs. The environment fingerprint is the actual
 reproducibility contract.

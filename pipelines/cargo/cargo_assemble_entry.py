@@ -293,7 +293,7 @@ def main() -> int:
     p.add_argument("--record-fat-digest", action="store_true",
                    help="Advisory only: record this host's fat-image OCI digest as "
                         "fatImage.expectedDigest. Usually a bad idea on first capture — "
-                        "apt layers jitter across hosts (see docs/reproducible-builds.md).")
+                        "apt layers jitter across hosts (see docs/cargo/reproducible-builds.md).")
     p.add_argument("--out-dir", default="./data/cargo")
     args = p.parse_args()
 

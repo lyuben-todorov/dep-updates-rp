@@ -36,7 +36,7 @@ hash.
 Byte-identical OCI digests proved impossible in practice due to
 apt-internal non-determinism even with pinned `SOURCE_DATE_EPOCH` + apt
 snapshot. Rationale and evidence in
-[`../docs/reproducible-builds.md`](../docs/reproducible-builds.md).
+[`docs/cargo/reproducible-builds.md`](docs/cargo/reproducible-builds.md).
 
 ## Directory layout
 
@@ -133,7 +133,7 @@ Two real v0.0.4 entries committed under `data/cargo/`:
 
 | Decision | See |
 | --- | --- |
-| Environment fingerprint over OCI digest | [`../docs/reproducible-builds.md`](../docs/reproducible-builds.md) |
+| Environment fingerprint over OCI digest | [`docs/cargo/reproducible-builds.md`](docs/cargo/reproducible-builds.md) |
 | Fat image covers ~93% of Cargo *-sys crates | [`docs/cargo/survey-findings.md`](docs/cargo/survey-findings.md) |
 | Dataset 1 over Dataset 2 for the paper corpus | [`../docs/rebatchi.md`](../docs/rebatchi.md) |
 | Canonical fat-image tags (`<rust>-<debian>-<yyyymmdd>`) | `pipelines/cargo/fat_image.py` |

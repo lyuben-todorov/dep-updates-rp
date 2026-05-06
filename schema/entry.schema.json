@@ -122,7 +122,7 @@
             },
             "expectedDigest": {
               "type": ["string", "null"],
-              "description": "OCI manifest digest observed when the entry was first validated. ADVISORY: mismatch is reported as a warning, not a hard fail, because of known apt-layer byte jitter (see docs/reproducible-builds.md).",
+              "description": "OCI manifest digest observed when the entry was first validated. ADVISORY: mismatch is reported as a warning, not a hard fail, because of known apt-layer byte jitter (see docs/cargo/reproducible-builds.md).",
               "pattern": "^sha256:[a-f0-9]{64}$"
             }
           }
