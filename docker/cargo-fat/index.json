@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "0.1.0",
+  "description": "Manifest of fat toolchain images known to this repo. Each entry records the inputs needed to rebuild the image byte-identically (modulo apt-layer jitter \u2014 see docs/reproducible-builds.md) and the environment fingerprint a consumer can verify against. The index is a *manifest of what exists*, not a policy file; new images are registered here after being built.",
+  "fatImages": [
+    {
+      "tag": "rp2026/cargo-fat:1.92.0-bookworm-20260415",
+      "rustVersion": "1.92.0",
+      "sourceDateEpoch": 1776211200,
+      "aptSnapshot": "20260415T000000Z",
+      "debianRelease": "bookworm",
+      "environmentFingerprint": "sha256:238aeacc2ead9b9e9d604013145265add4842ebe3455429764c35aed5aba427d",
+      "packageCount": 717,
+      "firstSeenAt": "2026-05-03",
+      "notes": "Seed image. Expected to cover modern (2023+) Rust entries with MSRV up to 1.92 on bookworm-era native deps."
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.92.0-bookworm-20260427",
+      "rustVersion": "1.92.0",
+      "sourceDateEpoch": 1777248000,
+      "aptSnapshot": "20260427T000000Z",
+      "debianRelease": "bookworm",
+      "environmentFingerprint": "sha256:b95070ba06fb7f6a66a6ad03b5fb6addd8622356b606f999fe5e841c7f325c43",
+      "packageCount": 717,
+      "firstSeenAt": "2026-05-03",
+      "notes": "built for fstubner/netscli#22"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.56.0-buster-20211022",
+      "rustVersion": "1.56.0",
+      "sourceDateEpoch": 1634860800,
+      "aptSnapshot": "20211022T000000Z",
+      "debianRelease": "buster",
+      "environmentFingerprint": "sha256:41bee9de457559640639b1c20c02ee818cb83f905a28fdd7d72d6f5b4cc531d2",
+      "packageCount": 456,
+      "firstSeenAt": "2026-05-03"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.56.0-bullseye-20220804",
+      "rustVersion": "1.56.0",
+      "sourceDateEpoch": 1659571200,
+      "aptSnapshot": "20220804T000000Z",
+      "debianRelease": "bullseye",
+      "environmentFingerprint": "sha256:2c49acb129ec5206abe6cf5aefc04c4a7d8296a9fc7e991c624d3055b3a94174",
+      "packageCount": 456,
+      "firstSeenAt": "2026-05-03"
+    }
+  ]
+}

@@ -1,24 +1,34 @@
-"""Cargo miner — find candidate breaking-update PRs.
+"""Cargo miner — find candidate dependency-update PRs from live GitHub.
 
 Given a GitHub repo slug (owner/name), enumerate PRs authored by Dependabot
-or Renovate that touch only Cargo.toml / Cargo.lock, and emit a JSON per
-candidate with the metadata needed by the reproducer.
+or Renovate that touch only Cargo.toml / Cargo.lock, and emit a v0.0.4
+`Candidate` JSON per PR with the metadata needed by the reproducer. Each
+emitted candidate is also enriched with `rust_msrv` and
+`post_commit_date` via additional GitHub API calls.
+
+Category (breaking / non-breaking / fix-after-update / unreproducible) is
+NOT decided here — it's discovered at reproduction time by
+`cargo_drive.py` based on pre/post exit codes. Every mined PR is an
+ingestion candidate; the pipeline decides later.
 
 POC scope: single repo, single-line version bumps, no scaling concerns.
+For bulk ingestion of historical corpora see
+`scripts/rebatchi_to_candidate.py`.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import asdict
 from typing import Iterator
 
 import requests
+
+from ._candidate import Candidate, gh_headers, classify_author
+from .cargo_toolchain import commit_date_at, msrv_at_commit
 
 GITHUB_API = "https://api.github.com"
 CARGO_VERSION_LINE = re.compile(
@@ -29,32 +39,8 @@ CARGO_TABLE_ENTRY = re.compile(
 )
 
 
-@dataclass
-class Candidate:
-    ecosystem: str
-    repo: str  # owner/name
-    pr_number: int
-    pr_url: str
-    pr_author: str
-    bot_type: str | None
-    merged: bool
-    breaking_commit: str
-    pre_breaking_commit: str
-    dependency_name: str
-    previous_version: str
-    new_version: str
-
-
-def _gh_headers() -> dict[str, str]:
-    tok = os.environ.get("GITHUB_TOKEN")
-    hdrs = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
-    if tok:
-        hdrs["Authorization"] = f"Bearer {tok}"
-    return hdrs
-
-
 def _get(url: str, params: dict | None = None) -> dict | list:
-    r = requests.get(url, headers=_gh_headers(), params=params or {}, timeout=30)
+    r = requests.get(url, headers=gh_headers(), params=params or {}, timeout=30)
     r.raise_for_status()
     return r.json()
 
@@ -76,17 +62,6 @@ def _list_pulls(repo: str, state: str = "all") -> Iterator[dict]:
 
 def _pr_files(repo: str, number: int) -> list[dict]:
     return _get(f"{GITHUB_API}/repos/{repo}/pulls/{number}/files")
-
-
-def _classify_author(login: str) -> tuple[str, str | None]:
-    low = (login or "").lower()
-    if "dependabot" in low:
-        return "bot", "dependabot"
-    if "renovate" in low:
-        return "bot", "renovate"
-    if low.endswith("[bot]"):
-        return "bot", "other"
-    return "human", None
 
 
 def _diff_oneline_bump(patch: str) -> tuple[str, str] | None:
@@ -151,13 +126,13 @@ def mine_repo(repo: str) -> Iterator[Candidate]:
             continue
         dep_name = _extract_dependency_name(added[0]) or "<unknown>"
 
-        breaking_commit = pr["head"]["sha"]
-        pre = _parent_commit(repo, breaking_commit)
+        post_commit = pr["head"]["sha"]
+        pre = _parent_commit(repo, post_commit)
         if not pre:
             continue
 
         author = (pr.get("user") or {}).get("login", "")
-        author_type, bot_type = _classify_author(author)
+        _, bot_type = classify_author(author)
 
         yield Candidate(
             ecosystem="cargo",
@@ -167,11 +142,14 @@ def mine_repo(repo: str) -> Iterator[Candidate]:
             pr_author=author,
             bot_type=bot_type,
             merged=bool(pr.get("merged_at")),
-            breaking_commit=breaking_commit,
-            pre_breaking_commit=pre,
+            pre_commit=pre,
+            post_commit=post_commit,
             dependency_name=dep_name,
             previous_version=prev,
             new_version=new,
+            rust_msrv=msrv_at_commit(repo, post_commit),
+            post_commit_date=commit_date_at(repo, post_commit),
+            source="live-gh",
         )
 
 

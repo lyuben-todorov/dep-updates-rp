@@ -1,6 +1,6 @@
 {
   "id": "cargo-0abf7148",
-  "schemaVersion": "0.0.2",
+  "schemaVersion": "0.0.4",
   "ecosystem": "cargo",
   "category": "breaking",
   "project": {
@@ -18,10 +18,10 @@
     "mergedAt": null
   },
   "commits": {
-    "preBreaking": "b508900064878eb1ed55a53a724da2fe58f56ad0",
-    "breaking": "0abf7148300f40a1da0538ab060552bca4a2f1d8",
-    "preBreakingAuthorType": "human",
-    "breakingAuthorType": "bot"
+    "pre": "b508900064878eb1ed55a53a724da2fe58f56ad0",
+    "post": "0abf7148300f40a1da0538ab060552bca4a2f1d8",
+    "preAuthorType": "human",
+    "postAuthorType": "bot"
   },
   "update": {
     "dependencyName": "serde",
@@ -31,15 +31,55 @@
     "scope": "runtime"
   },
   "reproduction": {
-    "preImage": "ghcr.io/tudelft-rp2026/breaking-updates-cargo:0abf7148-pre",
-    "breakingImage": "ghcr.io/tudelft-rp2026/breaking-updates-cargo:0abf7148-breaking",
-    "toolchain": "rust-1.75",
-    "verifiedOn": ["linux/amd64"]
+    "fatImage": {
+      "rustVersion": "1.75.0",
+      "sourceDateEpoch": 1704067200,
+      "aptSnapshot": "20240101T000000Z",
+      "debianRelease": "bookworm",
+      "expectedDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "buildFlags": [
+      "--locked",
+      "--offline"
+    ],
+    "environmentFingerprint": {
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "files": [
+        {
+          "path": "/manifest/packages.txt",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "bytes": 20000
+        },
+        {
+          "path": "/manifest/rustc.txt",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "bytes": 200
+        }
+      ],
+      "rustcVersion": "rustc 1.75.0 (82e1608df 2023-12-21)",
+      "packageCount": 700
+    },
+    "thinImages": {
+      "expectedPre": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "expectedPost": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "verifiedOn": [
+      {
+        "platform": "linux/amd64",
+        "host": "example-ci",
+        "verifiedAt": "2024-01-05T10:00:00Z",
+        "fingerprintMatch": true,
+        "fatImageDigestMatch": true,
+        "outcomeMatch": true
+      }
+    ]
   },
   "failure": {
     "topCategory": "COMPILATION_FAILURE",
     "subCategory": "TRAIT_BOUND_NOT_SATISFIED",
-    "errorCodes": ["E0277"]
+    "errorCodes": [
+      "E0277"
+    ]
   },
   "ecosystemMetadata": {
     "edition": "2021",

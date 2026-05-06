@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 data/cargo/logs/
 data/cargo/dockerfiles/
+data/rebatchi/

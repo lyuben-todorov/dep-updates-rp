@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://tudelft-rp2026.example/schemas/entry-0.0.2.json",
+  "$id": "https://tudelft-rp2026.example/schemas/entry-0.0.4.json",
   "title": "Reproducible Dependency Update Entry",
-  "description": "One reproducible dependency update across ecosystems. Shared contract for RP 2025/2026 Q4 — extending BUMP across ecosystems and update categories.",
+  "description": "One reproducible dependency update across ecosystems. Shared contract for RP 2025/2026 Q4 — extending BUMP across ecosystems and update categories. v0.0.4 renames the commit fields from breaking-centric (preBreaking/breaking) to category-neutral (pre/post) and adds an optional `fix` commit for fix-after-update entries. Thin-image digests are similarly renamed (expectedPre/expectedPost/expectedFix).",
   "type": "object",
   "required": [
     "id",
@@ -17,7 +17,7 @@
   "properties": {
     "id": {
       "type": "string",
-      "description": "Globally unique entry identifier. Convention: <ecosystem>-<breakingCommitShortHash>.",
+      "description": "Globally unique entry identifier. Convention: <ecosystem>-<postCommitShortHash>.",
       "pattern": "^(cargo|maven|pip|npm)-[a-f0-9]{7,40}$"
     },
     "schemaVersion": {
@@ -61,12 +61,15 @@
     },
     "commits": {
       "type": "object",
-      "required": ["preBreaking", "breaking"],
+      "description": "Commit SHAs defining the reproduction frames. `pre` = before the dependency update (baseline, tests expected to pass). `post` = after the update (for breaking: tests expected to fail; for non-breaking: tests expected to pass). `fix` = optional, present only for fix-after-update entries; tests expected to pass again.",
+      "required": ["pre", "post"],
       "properties": {
-        "preBreaking": { "type": "string", "pattern": "^[a-f0-9]{7,40}$" },
-        "breaking": { "type": "string", "pattern": "^[a-f0-9]{7,40}$" },
-        "preBreakingAuthorType": { "type": ["string", "null"], "enum": ["human", "bot", null] },
-        "breakingAuthorType": { "type": ["string", "null"], "enum": ["human", "bot", null] }
+        "pre": { "type": "string", "pattern": "^[a-f0-9]{7,40}$" },
+        "post": { "type": "string", "pattern": "^[a-f0-9]{7,40}$" },
+        "fix": { "type": ["string", "null"], "pattern": "^[a-f0-9]{7,40}$" },
+        "preAuthorType": { "type": ["string", "null"], "enum": ["human", "bot", null] },
+        "postAuthorType": { "type": ["string", "null"], "enum": ["human", "bot", null] },
+        "fixAuthorType": { "type": ["string", "null"], "enum": ["human", "bot", null] }
       }
     },
     "update": {
@@ -89,31 +92,129 @@
     },
     "reproduction": {
       "type": ["object", "null"],
-      "description": "Present only when the entry is reproduced (category != unreproducible).",
-      "required": ["preImage", "breakingImage", "toolchain"],
+      "description": "Present only when the entry is reproduced (category != unreproducible). Records the regeneration contract, not image references.",
+      "required": ["fatImage", "buildFlags", "environmentFingerprint"],
       "properties": {
-        "preImage": {
-          "type": "string",
-          "description": "Fully-qualified image reference, e.g. ghcr.io/<org>/breaking-updates-cargo:<hash>-pre"
+        "fatImage": {
+          "type": "object",
+          "description": "Inputs the regenerator needs to rebuild the fat toolchain image that all thin layers (pre/post/fix) sit on top of.",
+          "required": ["rustVersion", "sourceDateEpoch", "aptSnapshot", "debianRelease"],
+          "properties": {
+            "rustVersion": {
+              "type": "string",
+              "description": "Full patch version of rustc, e.g. '1.92.0'. Must be what the rust:X.Y.Z-<release> base image provides.",
+              "pattern": "^\\d+\\.\\d+\\.\\d+$"
+            },
+            "sourceDateEpoch": {
+              "type": "integer",
+              "description": "Unix timestamp used as SOURCE_DATE_EPOCH when building the fat image. Also controls the apt snapshot URL.",
+              "minimum": 0
+            },
+            "aptSnapshot": {
+              "type": "string",
+              "description": "Snapshot.debian.org timestamp, e.g. '20260415T000000Z'. Redundant with sourceDateEpoch but kept human-readable.",
+              "pattern": "^[0-9]{8}T[0-9]{6}Z$"
+            },
+            "debianRelease": {
+              "type": "string",
+              "description": "Debian codename, e.g. 'bookworm'.",
+              "enum": ["buster", "bullseye", "bookworm", "trixie"]
+            },
+            "expectedDigest": {
+              "type": ["string", "null"],
+              "description": "OCI manifest digest observed when the entry was first validated. ADVISORY: mismatch is reported as a warning, not a hard fail, because of known apt-layer byte jitter (see docs/reproducible-builds.md).",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
         },
-        "breakingImage": {
-          "type": "string",
-          "description": "Fully-qualified image reference, e.g. ghcr.io/<org>/breaking-updates-cargo:<hash>-breaking"
+        "buildFlags": {
+          "type": "array",
+          "description": "Exact flags passed to `cargo test` / equivalent build command. Part of the reproducibility contract.",
+          "items": { "type": "string" },
+          "minItems": 1
         },
-        "toolchain": {
-          "type": "string",
-          "description": "Ecosystem-specific toolchain string, e.g. rust-1.75, jdk-11, python-3.11, node-20"
+        "environmentFingerprint": {
+          "type": "object",
+          "description": "Environmental equivalence contract (Fork B). The regenerator rebuilds the fat image, extracts /manifest/*, and asserts each of these hashes matches. Exact match of `digest` is the bar for 'same environment'.",
+          "required": ["digest", "files"],
+          "properties": {
+            "digest": {
+              "type": "string",
+              "description": "sha256 of the concatenation of files listed in `files`, in the order listed. Single-value summary for fast comparison.",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "files": {
+              "type": "array",
+              "description": "Per-file hashes of /manifest/* inside the fat image, in concat order. Used for diagnostic diffs when `digest` mismatches.",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["path", "sha256", "bytes"],
+                "properties": {
+                  "path": { "type": "string", "description": "Path inside the fat image, e.g. '/manifest/packages.txt'." },
+                  "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                  "bytes": { "type": "integer", "minimum": 0 }
+                }
+              }
+            },
+            "rustcVersion": {
+              "type": ["string", "null"],
+              "description": "Copy of /manifest/rustc.txt first line, for human glanceability. Not used for comparison."
+            },
+            "packageCount": {
+              "type": ["integer", "null"],
+              "description": "Number of lines in /manifest/packages.txt. For human glanceability."
+            }
+          }
+        },
+        "thinImages": {
+          "type": ["object", "null"],
+          "description": "Advisory digests for the per-entry thin images. MISMATCH IS NOT A FAIL — thin-image byte reproducibility is not in scope. Recorded for cross-host comparison studies. `expectedFix` present only for fix-after-update entries.",
+          "properties": {
+            "expectedPre": {
+              "type": ["string", "null"],
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "expectedPost": {
+              "type": ["string", "null"],
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "expectedFix": {
+              "type": ["string", "null"],
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
         },
         "verifiedOn": {
           "type": "array",
-          "description": "Platform strings (Docker-style: linux/amd64, darwin/arm64) on which reproducibility was sanity-checked.",
-          "items": { "type": "string" }
+          "description": "Platforms + hosts the reproduction contract was verified on. Empty on first ingestion; appended to by the regenerator.",
+          "items": {
+            "type": "object",
+            "required": ["platform", "verifiedAt", "fingerprintMatch"],
+            "properties": {
+              "platform": {
+                "type": "string",
+                "description": "Docker-style platform, e.g. linux/amd64, linux/arm64."
+              },
+              "host": {
+                "type": ["string", "null"],
+                "description": "Free-text host label, e.g. 'macbook-local', 'tudelft-ci'. Helpful for cross-host studies."
+              },
+              "verifiedAt": { "type": "string", "format": "date-time" },
+              "fingerprintMatch": { "type": "boolean" },
+              "fatImageDigestMatch": { "type": ["boolean", "null"] },
+              "outcomeMatch": {
+                "type": ["boolean", "null"],
+                "description": "Did the regeneration reproduce the recorded pass/fail outcome? Null if not attempted."
+              }
+            }
+          }
         }
       }
     },
     "failure": {
       "type": ["object", "null"],
-      "description": "Present when reproduction confirmed a failing build.",
+      "description": "Present when reproduction confirmed a failing build (breaking entries or the pre-fix step of fix-after-update entries).",
       "required": ["topCategory"],
       "properties": {
         "topCategory": {
@@ -146,8 +247,10 @@
       "type": ["string", "null"],
       "description": "Present when category == unreproducible. Short free-text reason.",
       "enum": [
-        "pre_breaking_build_failed",
-        "breaking_build_passed",
+        "pre_build_failed",
+        "post_passed_when_expected_to_fail",
+        "post_failed_when_expected_to_pass",
+        "fix_did_not_restore",
         "external_service_required",
         "toolchain_unavailable",
         "flaky_tests",

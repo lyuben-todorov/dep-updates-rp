@@ -13,9 +13,14 @@ from .models import (
     Commits,
     Update,
     Reproduction,
+    FatImage,
+    EnvironmentFingerprint,
+    FingerprintFile,
+    ThinImages,
+    VerifiedOn,
     Failure,
 )
-from .writer import EntryWriter, image_ref
+from .writer import EntryWriter
 from .validate import validate_entry, SchemaError
 
 __all__ = [
@@ -33,11 +38,15 @@ __all__ = [
     "Commits",
     "Update",
     "Reproduction",
+    "FatImage",
+    "EnvironmentFingerprint",
+    "FingerprintFile",
+    "ThinImages",
+    "VerifiedOn",
     "Failure",
     "EntryWriter",
-    "image_ref",
     "validate_entry",
     "SchemaError",
 ]
 
-SCHEMA_VERSION = "0.0.2"
+SCHEMA_VERSION = "0.0.4"

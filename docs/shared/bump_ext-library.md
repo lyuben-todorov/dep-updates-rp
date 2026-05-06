@@ -1,163 +1,207 @@
 # `bump_ext` — shared Python library
 
-A thin library that makes the shared schema ergonomic from Python. Three
-source files under `lib/bump_ext/`. Optional for pipelines not written in
-Python — those can validate against `schema/entry.schema.json` directly in
-their own language.
+A thin library that makes the shared schema (v0.0.4) ergonomic from
+Python. Four source files under `lib/bump_ext/`. Optional for pipelines
+not written in Python — those can validate against
+`schema/entry.schema.json` directly.
 
 ## Why it exists
 
 Without a shared library, every ecosystem pipeline re-implements:
 - Schema validation.
-- Docker image naming.
 - JSON output shape (field ordering, null handling, enum serialisation).
+- Ecosystem-specific naming conventions.
 
-Drift is inevitable. The library enforces one source of truth for all three.
+Drift is inevitable. The library enforces one source of truth for the
+first two — ecosystem-specific naming (fat image tags, thin-image tags)
+lives in the respective `pipelines/<eco>/` tree.
 
-## What's in it
+## Layout
 
-### `models.py` — Pydantic v2 models
+```
+lib/bump_ext/
+  __init__.py   — public API, SCHEMA_VERSION constant
+  models.py     — Pydantic v2 models mirroring the schema
+  validate.py   — JSON Schema 2020-12 validator wrapper
+  writer.py     — EntryWriter: validate then write
+```
 
-Every nesting level of the schema has a corresponding Python class:
-`Project`, `PR`, `Commits`, `Update`, `Reproduction`, `Failure`, `Entry`.
-Enums are mirrored as Python enums: `Ecosystem`, `UpdateCategory`,
-`AuthorType`, `BotType`, `VersionUpdateType`, `Scope`, `TopFailureCategory`,
-`UnreproducibilityReason`.
+## `models.py` — Pydantic v2 models
+
+Every nesting level has a Python class:
+
+- `Entry` (root)
+- `Project`, `PR`, `Commits`, `Update`, `Failure`
+- `Reproduction` with sub-models: `FatImage`, `EnvironmentFingerprint`,
+  `FingerprintFile`, `ThinImages`, `VerifiedOn`
+
+Enums mirrored as Python enums:
+- `Ecosystem` (cargo/maven/pip/npm)
+- `UpdateCategory` (breaking/non-breaking/fix-after-update/unreproducible)
+- `AuthorType`, `BotType`, `VersionUpdateType`, `Scope`
+- `TopFailureCategory`
+- `UnreproducibilityReason`
 
 Pydantic enforces at construction time:
 - Enum membership — `Ecosystem("xcode")` raises.
 - Numeric ranges — `PR(number=0)` raises (minimum 1).
-- Regex patterns — `Entry(id="nope")` raises (must match
-  `^(cargo|maven|pip|npm)-[a-f0-9]{7,40}$`).
-- Extra fields — typos like `reproductions` instead of `reproduction` raise
-  (`extra="forbid"`).
+- Regex patterns — `Entry(id="nope")` raises.
+- Extra fields — typos like `reproductions` instead of `reproduction`
+  raise (all models use `extra="forbid"`).
 
-`use_enum_values=True` on `Entry` ensures that when you dump to JSON, enums
-serialise as their string values, not as Python repr.
+`use_enum_values=True` on `Entry` means enums serialise as their string
+values when dumping to JSON.
 
-### `validate.py` — JSON Schema validator
+## `validate.py` — JSON Schema validator
 
 Two responsibilities:
 1. Load `schema/entry.schema.json` once (cached at module level).
-2. Expose `validate_entry(dict)` which raises `SchemaError` with readable
-   messages when the dict does not match.
+2. Expose `validate_entry(dict)` which raises `SchemaError` with
+   readable messages when the dict does not match.
 
-### Why validate twice (Pydantic + JSON Schema)?
+## Why validate twice (Pydantic + JSON Schema)?
 
 They validate different things:
-- **Pydantic** validates Python objects at the *construction* boundary.
-- **JSON Schema** validates JSON at the *serialisation* boundary.
+- **Pydantic** validates Python objects at construction.
+- **JSON Schema** validates JSON at serialisation.
 
-They can disagree. If `models.py` drifts from `entry.schema.json`, pydantic
-will happily build an `Entry` that fails schema validation. Running both at
-the write boundary (Python object → `model_dump()` → `validate_entry()` →
-disk) catches drift at the point where it matters.
+They can disagree. If `models.py` drifts from `entry.schema.json`,
+Pydantic will happily build an `Entry` that fails schema validation.
+Running both at the write boundary (Python → `model_dump()` →
+`validate_entry()` → disk) catches drift where it matters. Cost is
+microseconds per entry.
 
-Cost is negligible — schema validation on a single entry is microseconds.
+## `writer.py` — entry writer
 
-### `writer.py` — entry writer + image naming
+```python
+EntryWriter(output_dir).write(entry) -> Path
+```
 
-`image_ref(ecosystem, breaking_commit, kind, registry=...)` — canonical
-Docker image reference. Every pipeline calls this instead of constructing
-strings by hand. If the registry or format ever changes, we update one
-function.
+Under the hood: `entry.model_dump(mode="json")` →
+`validate_entry(data)` → `json.dump(data, f)`. An invalid entry never
+touches disk.
 
-`EntryWriter(output_dir)` — pipeline handoff. Under the hood:
-`entry.model_dump()` → `validate_entry()` → `json.dump()`. An invalid entry
-never touches disk.
+Note: previous versions also exposed `image_ref()`. Removed in v0.0.3
+when the reproducibility model switched from published OCI digests to
+environment fingerprints. Fat-image tag conventions now live in
+`pipelines/cargo/fat_image.py::fat_image_tag()`.
 
-### `__init__.py` — public API
+## `__init__.py` — public API
 
-Re-exports everything consumers need. Constants like `SCHEMA_VERSION`
-ensure everyone stamps the same version on their entries.
+```python
+from bump_ext import (
+    # Root + nested models
+    Entry, Project, PR, Commits, Update,
+    Reproduction, FatImage, EnvironmentFingerprint, FingerprintFile,
+    ThinImages, VerifiedOn, Failure,
+    # Enums
+    Ecosystem, UpdateCategory, AuthorType, BotType,
+    VersionUpdateType, Scope, TopFailureCategory,
+    UnreproducibilityReason,
+    # Writer + validator
+    EntryWriter, validate_entry, SchemaError,
+    # Constant
+    SCHEMA_VERSION,
+)
+```
 
-## How the library reduces coordination
-
-The same questions keep coming up across pipelines. The library answers
-them once:
-
-| Question | Library answer |
-| --- | --- |
-| What do I call my Docker images? | `image_ref()` |
-| What schema version do I stamp? | `SCHEMA_VERSION` |
-| Is this field required or optional? | Pydantic model tells you |
-| Is my JSON valid? | `EntryWriter.write()` validates on write |
-| What are the valid enum values? | Python enum classes |
-
-A new ecosystem owner writes their pipeline against `Entry`/`Project`/etc.,
-never hand-crafts JSON. Tests pass locally, output is guaranteed to validate
-against the shared schema.
+`SCHEMA_VERSION` (`"0.0.4"`) must be stamped on every entry's
+`schemaVersion` field. New ecosystem pipelines just `import
+SCHEMA_VERSION` — no string literals.
 
 ## Usage from Python pipelines
 
 ```python
 from bump_ext import (
     Entry, EntryWriter, Ecosystem, UpdateCategory,
-    Project, PR, Commits, Update, Reproduction, Failure,
-    TopFailureCategory, SCHEMA_VERSION, image_ref,
+    Project, PR, Commits, Update,
+    Reproduction, FatImage, EnvironmentFingerprint, FingerprintFile,
+    ThinImages, VerifiedOn,
+    Failure, TopFailureCategory,
+    SCHEMA_VERSION,
 )
 
 entry = Entry(
-    id=f"cargo-{breaking[:8]}",
+    id=f"cargo-{post_sha[:8]}",
     schemaVersion=SCHEMA_VERSION,
     ecosystem=Ecosystem.cargo,
     category=UpdateCategory.breaking,
-    project=Project(url="...", organisation="foo", name="bar"),
-    pr=PR(url="...", number=42, author="dependabot[bot]",
+    project=Project(url="https://github.com/foo/bar", organisation="foo", name="bar"),
+    pr=PR(url="https://github.com/foo/bar/pull/42",
+          number=42, author="dependabot[bot]",
           authorType="bot", botType="dependabot"),
-    commits=Commits(preBreaking=pre, breaking=breaking),
+    commits=Commits(pre=pre_sha, post=post_sha),
     update=Update(
         dependencyName="serde",
-        previousVersion="1.0.150", newVersion="1.0.160",
-        versionUpdateType="minor", scope="runtime",
+        previousVersion="1.0.150",
+        newVersion="1.0.160",
+        versionUpdateType="minor",
+        scope="runtime",
     ),
     reproduction=Reproduction(
-        preImage=image_ref("cargo", breaking, "pre"),
-        breakingImage=image_ref("cargo", breaking, "breaking"),
-        toolchain="rust-1.75",
-        verifiedOn=["linux/amd64"],
+        fatImage=FatImage(
+            rustVersion="1.56.0",
+            sourceDateEpoch=1634860800,
+            aptSnapshot="20211022T000000Z",
+            debianRelease="buster",
+        ),
+        buildFlags=["--locked", "--offline"],
+        environmentFingerprint=EnvironmentFingerprint(
+            digest="sha256:…",
+            files=[
+                FingerprintFile(path="/manifest/packages.txt", sha256="…", bytes=22866),
+                # ... etc
+            ],
+        ),
+        thinImages=None,
+        verifiedOn=[],
     ),
     failure=Failure(
         topCategory=TopFailureCategory.COMPILATION_FAILURE,
-        subCategory="TRAIT_BOUND_NOT_SATISFIED",
-        errorCodes=["E0277"],
+        subCategory="TYPE_MISMATCH",
+        errorCodes=["E0308"],
     ),
 )
 EntryWriter("./data/cargo").write(entry)
 ```
 
+For a `non-breaking` entry, `failure` is `None` (no failing commit to
+classify). For `fix-after-update`, add `commits.fix` and
+`reproduction.thinImages.expectedFix` if known.
+
 ## Usage from non-Python pipelines
 
-The schema is language-agnostic. Java/JS/Rust pipelines can:
-
 1. Read `schema/entry.schema.json`.
-2. Build their JSON using whatever they want.
+2. Build JSON in whatever tool fits your ecosystem.
 3. Validate against the schema with any JSON Schema 2020-12 validator
-   (`ajv` for JS, `everit-json-schema` for Java, `jsonschema` crate for
-   Rust).
-4. Call `image_ref()`'s rules themselves — the convention is one line of
-   string formatting.
+   (`ajv` for JS, `jsonschema` for Java, `jsonschema` / `jtd` crates
+   for Rust).
+4. For fat-image tag naming: `rp2026/cargo-fat:<rust>-<debian>-<yyyymmdd>`.
+   (Cargo-specific; each ecosystem owns its own image convention.)
 
-The library is a convenience, not a requirement. The schema is the contract.
+The library is a convenience, not a requirement. The schema is the
+contract.
 
-## What goes in (and what doesn't)
+## Scope
 
-**In:**
+**In scope:**
 - Types mirroring the schema.
-- Helpers that enforce conventions (image naming, ID format).
 - Validation.
+- The entry writer.
 
-**Out:**
-- Ecosystem-specific logic (that lives in `pipelines/<eco>/`).
-- Mining/reproduction/classification code (ditto).
-- Analysis or aggregation (that lives with RQ1/RQ2).
+**Out of scope:**
+- Ecosystem-specific logic (that's `pipelines/<eco>/`).
+- Mining / reproduction / classification.
+- Analysis or aggregation (lives with the paper).
 
-Keep the library small. The whole point is that a new ecosystem owner can
-read it in one sitting.
+Keep the library small — a new ecosystem owner should be able to read
+it in one sitting.
 
 ## Versioning
 
-`SCHEMA_VERSION` in `__init__.py` tracks the schema's semver.
-`pyproject.toml` tracks the library's package version (usually the same).
-Breaking API changes in the library bump the library's major version;
-breaking schema changes bump both.
+- `SCHEMA_VERSION` in `__init__.py` tracks the schema's semver. Every
+  entry stamps its `schemaVersion` from this constant.
+- `pyproject.toml` tracks the library's package version (usually the
+  same).
+- Breaking API changes in the library bump the library's major version.
+- Breaking schema changes bump both.

@@ -62,8 +62,10 @@ class TopFailureCategory(str, Enum):
 
 
 class UnreproducibilityReason(str, Enum):
-    pre_breaking_build_failed = "pre_breaking_build_failed"
-    breaking_build_passed = "breaking_build_passed"
+    pre_build_failed = "pre_build_failed"
+    post_passed_when_expected_to_fail = "post_passed_when_expected_to_fail"
+    post_failed_when_expected_to_pass = "post_failed_when_expected_to_pass"
+    fix_did_not_restore = "fix_did_not_restore"
     external_service_required = "external_service_required"
     toolchain_unavailable = "toolchain_unavailable"
     flaky_tests = "flaky_tests"
@@ -92,10 +94,12 @@ class PR(BaseModel):
 
 class Commits(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    preBreaking: str = Field(pattern=r"^[a-f0-9]{7,40}$")
-    breaking: str = Field(pattern=r"^[a-f0-9]{7,40}$")
-    preBreakingAuthorType: AuthorType | None = None
-    breakingAuthorType: AuthorType | None = None
+    pre: str = Field(pattern=r"^[a-f0-9]{7,40}$")
+    post: str = Field(pattern=r"^[a-f0-9]{7,40}$")
+    fix: str | None = Field(default=None, pattern=r"^[a-f0-9]{7,40}$")
+    preAuthorType: AuthorType | None = None
+    postAuthorType: AuthorType | None = None
+    fixAuthorType: AuthorType | None = None
 
 
 class Update(BaseModel):
@@ -107,12 +111,54 @@ class Update(BaseModel):
     scope: Scope | None = None
 
 
+class FatImage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rustVersion: str = Field(pattern=r"^\d+\.\d+\.\d+$")
+    sourceDateEpoch: int = Field(ge=0)
+    aptSnapshot: str = Field(pattern=r"^[0-9]{8}T[0-9]{6}Z$")
+    debianRelease: str = Field(pattern=r"^(buster|bullseye|bookworm|trixie)$")
+    expectedDigest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
+
+
+class FingerprintFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    bytes: int = Field(ge=0)
+
+
+class EnvironmentFingerprint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    digest: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+    files: list[FingerprintFile] = Field(min_length=1)
+    rustcVersion: str | None = None
+    packageCount: int | None = None
+
+
+class ThinImages(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedPre: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
+    expectedPost: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
+    expectedFix: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
+
+
+class VerifiedOn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    platform: str
+    host: str | None = None
+    verifiedAt: datetime
+    fingerprintMatch: bool
+    fatImageDigestMatch: bool | None = None
+    outcomeMatch: bool | None = None
+
+
 class Reproduction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    preImage: str
-    breakingImage: str
-    toolchain: str
-    verifiedOn: list[str] = Field(default_factory=list)
+    fatImage: FatImage
+    buildFlags: list[str] = Field(min_length=1)
+    environmentFingerprint: EnvironmentFingerprint
+    thinImages: ThinImages | None = None
+    verifiedOn: list[VerifiedOn] = Field(default_factory=list)
 
 
 class Failure(BaseModel):
