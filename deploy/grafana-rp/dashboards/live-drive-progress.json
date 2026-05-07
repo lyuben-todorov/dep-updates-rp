@@ -139,6 +139,42 @@
         "queryText": "SELECT substr(reason, 1, 80) AS reason, COUNT(*) AS count FROM drive_state WHERE run_id = '$run_id' AND status != 'ok' AND reason IS NOT NULL GROUP BY substr(reason, 1, 80) ORDER BY count DESC LIMIT 20",
         "timeColumns": []
       }]
+    },
+    {
+      "id": 9,
+      "title": "Recent events (last 100)",
+      "description": "Live stream of per-candidate verdicts. Each row = one completed candidate. Newest first. reason is truncated; query drive_state directly for the full text.",
+      "type": "table",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 20},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT updated_at AS at, candidate_key, status, rust_msrv AS msrv, commit_date AS date, substr(fat_image_tag, 19) AS fat, substr(reason, 1, 80) AS reason FROM drive_state WHERE run_id = '$run_id' ORDER BY updated_at DESC LIMIT 100",
+        "queryText": "SELECT updated_at AS at, candidate_key, status, rust_msrv AS msrv, commit_date AS date, substr(fat_image_tag, 19) AS fat, substr(reason, 1, 80) AS reason FROM drive_state WHERE run_id = '$run_id' ORDER BY updated_at DESC LIMIT 100",
+        "timeColumns": []
+      }],
+      "options": {"showHeader": true, "cellHeight": "sm"},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "left"}},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "status"},
+            "properties": [{
+              "id": "mappings",
+              "value": [
+                {"type": "value", "options": {"ok": {"color": "green", "index": 0}}},
+                {"type": "value", "options": {"not_reproducible": {"color": "orange", "index": 1}}},
+                {"type": "value", "options": {"fat_image_missing": {"color": "red", "index": 2}}},
+                {"type": "value", "options": {"metadata_fetch_failed": {"color": "red", "index": 3}}}
+              ]
+            }, {
+              "id": "custom.cellOptions",
+              "value": {"type": "color-text"}
+            }]
+          }
+        ]
+      }
     }
   ]
 }
