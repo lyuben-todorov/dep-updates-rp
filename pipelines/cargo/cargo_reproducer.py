@@ -26,6 +26,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -41,7 +42,15 @@ DEFAULT_RUST_IMAGE = "rust:1.75-alpine"
 # Script fragments must be POSIX sh compatible (Alpine ships ash, not bash).
 APK_DEPS = "apk add --no-cache git musl-dev gcc pkgconfig openssl-dev"
 DEB_THIN_DEPS = "apt-get update >/dev/null && apt-get install -y --no-install-recommends git pkg-config build-essential libssl-dev >/dev/null"
-BUILD_CMD = "cargo test --locked --message-format=json-diagnostic-rendered-ansi --no-fail-fast"
+# Plain `json` message format — supported by every cargo since ~2017.
+# The richer `json-diagnostic-rendered-ansi` variant (added ~rustc 1.38) keeps
+# the pretty-printed `rendered` field which is nicer for humans reading logs,
+# but some candidate repos pin an older rustc via rust-toolchain that rejects
+# the fancier format with "isn't a valid value for --message-format" — exit 1
+# before a single test runs, classified wrongly as pre_build_failed.
+# The classifier only reads the JSON stream, so dropping `-rendered-ansi`
+# costs nothing and unbreaks the old-toolchain candidates.
+BUILD_CMD = "cargo test --locked --message-format=json --no-fail-fast"
 
 # A tiny image used only for `git clone` + file-read during toolchain detection.
 GIT_HELPER_IMAGE = "alpine/git:latest"
@@ -153,6 +162,11 @@ def _run_in_docker(
 ) -> int:
     """Clone repo, checkout commit (including PR refs), run cargo test."""
     repo_url = f"https://github.com/{repo}.git"
+    # Name the container so we can `docker kill` it on timeout — without this,
+    # subprocess.run's TimeoutExpired terminates the `docker` CLI client but
+    # leaves the daemon-side container running (hung tests = N workers
+    # deadlocked waiting on container exit that never comes).
+    container_name = f"cargo-repro-{uuid.uuid4().hex[:12]}"
     # Handles both branch-tip commits and closed-PR commits that aren't
     # reachable from the default branch: first try a plain checkout, then
     # fall back to fetching the commit explicitly.
@@ -166,6 +180,7 @@ def _run_in_docker(
     )
     cmd = [
         "docker", "run", "--rm",
+        "--name", container_name,
         "--network", "bridge",
         toolchain_image,
         "sh", "-c", inner_script,
@@ -175,6 +190,12 @@ def _run_in_docker(
             r = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, timeout=timeout_s)
             return r.returncode
         except subprocess.TimeoutExpired:
+            # Don't leave the container running — it'll hold the worker.
+            subprocess.run(
+                ["docker", "kill", container_name],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
             return 124
 
 

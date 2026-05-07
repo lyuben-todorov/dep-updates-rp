@@ -49,6 +49,27 @@ ENV_MARKERS = (
     "linker `cc` not found",
 )
 
+# Build-script panics that indicate a host-environment mismatch rather than
+# a code defect. These are "we can't reproduce because the environment
+# changed upstream" — distinct from the project's own code failing to compile.
+# Checked before falling through to DEPENDENCY_RESOLUTION / TEST / plain ENV.
+BUILD_SCRIPT_ENV_MARKERS: dict[str, str] = {
+    # openssl@0.9.x build.rs can't parse Debian buster+'s OpenSSL 1.1 headers.
+    # Intrinsic to pre-2018 openssl crates + post-stretch Debian.
+    "unable to detect openssl version": "OPENSSL_VERSION_DETECT",
+    # pear_codegen / rocket_codegen aborted due to nightly/incompatible rustc.
+    "aborting compilation due to incompatible compiler": "INCOMPATIBLE_COMPILER",
+}
+
+# Lockfile / registry state. Genuinely cargo-level, but neither resolution
+# (we never got to resolve) nor compile — it's "the project's own Cargo.lock
+# is stale relative to Cargo.toml and we ran --locked to enforce
+# reproducibility."
+LOCKFILE_MARKERS = (
+    "needs to be updated but --locked was passed",
+    "needs to be updated but --frozen was passed",
+)
+
 
 @dataclass
 class Classification:
@@ -83,6 +104,23 @@ def classify(log_text: str) -> Classification:
         )
 
     low = log_text.lower()
+
+    # Build-script environmental panics come before the generic markers — the
+    # openssl / codegen cases would otherwise fall through to OTHER.
+    for marker, sub in BUILD_SCRIPT_ENV_MARKERS.items():
+        if marker in low:
+            return Classification(
+                topCategory=TopFailureCategory.ENVIRONMENT_FAILURE.value,
+                subCategory=sub,
+                errorCodes=[],
+            )
+
+    if any(m in low for m in LOCKFILE_MARKERS):
+        return Classification(
+            topCategory=TopFailureCategory.DEPENDENCY_RESOLUTION_FAILURE.value,
+            subCategory="LOCK_FILE_STALE",
+            errorCodes=[],
+        )
 
     if any(m.lower() in low for m in RESOLUTION_MARKERS):
         return Classification(
