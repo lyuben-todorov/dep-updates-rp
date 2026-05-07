@@ -55,6 +55,21 @@ BUILD_CMD = "cargo test --locked --message-format=json --no-fail-fast"
 # A tiny image used only for `git clone` + file-read during toolchain detection.
 GIT_HELPER_IMAGE = "alpine/git:latest"
 
+# Host-side cargo cache directory. Mounted into every reproducer container at
+# /usr/local/cargo so that the crates.io index + downloaded crate tarballs
+# persist across candidates. First candidate pays the full download cost;
+# subsequent candidates hit the cache for ~60-80% of deps (2019-era Rust
+# ecosystem has heavy overlap on serde/tokio/hyper/clap/log). Cuts network
+# traffic ~3-5×, which matters on bandwidth-constrained hosts (5G, cloud
+# egress caps).
+#
+# Read per-call from the CARGO_CACHE_DIR env var (set by cargo_drive). Empty
+# or unset disables the mount and each candidate gets a fresh empty cache.
+
+
+def _cargo_cache_dir() -> str:
+    return os.environ.get("CARGO_CACHE_DIR", "")
+
 # Image-tag prefixes that are pre-provisioned with git + all *-dev packages
 # (see docker/cargo-fat/Dockerfile). These skip the runtime install step.
 FAT_IMAGE_PREFIXES = ("rp2026/cargo-fat", "ghcr.io/tudelft-rp2026/cargo-fat")
@@ -182,9 +197,21 @@ def _run_in_docker(
         "docker", "run", "--rm",
         "--name", container_name,
         "--network", "bridge",
-        toolchain_image,
-        "sh", "-c", inner_script,
     ]
+    cache_dir = _cargo_cache_dir()
+    if cache_dir:
+        # Ensure the host dir exists (driver creates it with mode 0o777 at
+        # startup; this is a belt-and-braces no-op).
+        #
+        # Mount to /cargo-cache and set CARGO_HOME there, NOT onto
+        # /usr/local/cargo — that path contains the fat image's actual cargo
+        # and rustc binaries, and bind-mounting over it hides them.
+        # CARGO_HOME relocates the registry + git + .cargo-lock; the binaries
+        # keep being found via PATH.
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        cmd += ["-v", f"{cache_dir}:/cargo-cache",
+                "-e", "CARGO_HOME=/cargo-cache"]
+    cmd += [toolchain_image, "sh", "-c", inner_script]
     with log_out.open("wb") as f:
         try:
             r = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, timeout=timeout_s)

@@ -492,6 +492,13 @@ def main() -> int:
                    help="Skip the fat-image availability check at startup. "
                         "Default is to fail fast if any candidate's canonical "
                         "fat-image tag is not locally present as a Docker image.")
+    p.add_argument("--cargo-cache", default=None,
+                   help="Host directory bind-mounted into every reproducer "
+                        "container at /usr/local/cargo. First candidate pulls "
+                        "the crates.io index + crate tarballs; subsequent "
+                        "candidates reuse the cache, cutting network ~3-5×. "
+                        "Pass empty string to disable. Default: data/cargo-cache/ "
+                        "next to the state file.")
     args = p.parse_args()
 
     max_sde_date = args.max_sde_date or _fat.default_max_sde_date()
@@ -508,6 +515,24 @@ def main() -> int:
     logs_dir = Path(args.logs_dir)
     state_path = Path(args.state)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Cargo cache: set the env var `_reproducer` reads. Create dir now so the
+    # first worker doesn't race on mkdir; chmod 0777 so containers running
+    # as root-in-container + later host-user cleanup both work.
+    if args.cargo_cache is None:
+        cargo_cache_path = Path(args.state).parent.parent / "cargo-cache"
+    elif args.cargo_cache == "":
+        cargo_cache_path = None
+    else:
+        cargo_cache_path = Path(args.cargo_cache).resolve()
+    if cargo_cache_path is not None:
+        cargo_cache_path.mkdir(parents=True, exist_ok=True)
+        cargo_cache_path.chmod(0o777)
+        import os as _os
+        _os.environ["CARGO_CACHE_DIR"] = str(cargo_cache_path)
+        print(f"cargo cache: {cargo_cache_path}", file=sys.stderr)
+    else:
+        print("cargo cache: disabled", file=sys.stderr)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     existing = load_state(state_path)
