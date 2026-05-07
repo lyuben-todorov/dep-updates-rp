@@ -20,6 +20,18 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-$HOME/rp2026}"
 ENTRY="${ENTRY:-$REPO_DIR/data/cargo/cargo-9ac20c07.json}"
 DB="${DB:-$REPO_DIR/data/pipeline.sqlite}"
+# Docker Desktop ships `desktop-linux`; Linux with manual buildx setup ships
+# whatever bootstrap.sh created (default: `rp2026`). Pick whichever exists.
+BUILDX_BUILDER="${BUILDX_BUILDER:-}"
+if [ -z "$BUILDX_BUILDER" ]; then
+  if docker buildx inspect desktop-linux >/dev/null 2>&1; then
+    BUILDX_BUILDER="desktop-linux"
+  elif docker buildx inspect rp2026 >/dev/null 2>&1; then
+    BUILDX_BUILDER="rp2026"
+  else
+    BUILDX_BUILDER="default"
+  fi
+fi
 
 log() { printf '\033[36m[smoke]\033[0m %s\n' "$*"; }
 die() { printf '\033[31m[smoke] %s\033[0m\n' "$*" >&2; exit 1; }
@@ -34,7 +46,7 @@ cd "$REPO_DIR"
 [ -f .env ] && { set -a; . .env; set +a; }
 
 HOST="$(hostname)"
-log "host=$HOST entry=$ENTRY"
+log "host=$HOST entry=$ENTRY builder=$BUILDX_BUILDER"
 
 # ---- run regenerate ---------------------------------------------------------
 
@@ -43,7 +55,8 @@ log "regenerating $(basename "$ENTRY") — this builds the fat image if missing 
   --entry "$ENTRY" \
   --build-missing-bases \
   --host "$HOST" \
-  --timeout 1800
+  --timeout 1800 \
+  --builder "$BUILDX_BUILDER"
 
 # ---- refresh SQLite mirror --------------------------------------------------
 
