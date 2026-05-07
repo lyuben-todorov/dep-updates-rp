@@ -520,7 +520,7 @@ def main() -> int:
     # first worker doesn't race on mkdir; chmod 0777 so containers running
     # as root-in-container + later host-user cleanup both work.
     if args.cargo_cache is None:
-        cargo_cache_path = Path(args.state).parent.parent / "cargo-cache"
+        cargo_cache_path = (Path(args.state).parent.parent / "cargo-cache").resolve()
     elif args.cargo_cache == "":
         cargo_cache_path = None
     else:
@@ -529,6 +529,9 @@ def main() -> int:
         cargo_cache_path.mkdir(parents=True, exist_ok=True)
         cargo_cache_path.chmod(0o777)
         import os as _os
+        # Docker -v needs an absolute path; relative paths get interpreted as
+        # named volumes and fail with "invalid characters for a local volume
+        # name". resolve() above handles that.
         _os.environ["CARGO_CACHE_DIR"] = str(cargo_cache_path)
         print(f"cargo cache: {cargo_cache_path}", file=sys.stderr)
     else:
