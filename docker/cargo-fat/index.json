@@ -43,6 +43,36 @@
       "environmentFingerprint": "sha256:2c49acb129ec5206abe6cf5aefc04c4a7d8296a9fc7e991c624d3055b3a94174",
       "packageCount": 456,
       "firstSeenAt": "2026-05-03"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.49.0-buster-20210209",
+      "rustVersion": "1.49.0",
+      "sourceDateEpoch": 1612828800,
+      "aptSnapshot": "20210209T000000Z",
+      "debianRelease": "buster",
+      "environmentFingerprint": "sha256:5d8e3568e7a630e2371a3654408c78a8161c785330b5006dd594d994a3e2ff38",
+      "packageCount": 456,
+      "firstSeenAt": "2026-05-07"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.56.0-buster-20211231",
+      "rustVersion": "1.56.0",
+      "sourceDateEpoch": 1640908800,
+      "aptSnapshot": "20211231T000000Z",
+      "debianRelease": "buster",
+      "environmentFingerprint": "sha256:6c31616c4d6dca483af7ca2f458d9ff5a7b39b3d61cfc3abd46202aa8e0fe6c3",
+      "packageCount": 456,
+      "firstSeenAt": "2026-05-07"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.49.0-buster-20211231",
+      "rustVersion": "1.49.0",
+      "sourceDateEpoch": 1640908800,
+      "aptSnapshot": "20211231T000000Z",
+      "debianRelease": "buster",
+      "environmentFingerprint": "sha256:eb5e41de7cb076301a9dcaa78fb2885604d3959ad5f58cef32cb55792e34baef",
+      "packageCount": 456,
+      "firstSeenAt": "2026-05-07"
     }
   ]
 }

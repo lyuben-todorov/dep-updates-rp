@@ -37,12 +37,15 @@ import argparse
 import dataclasses
 import datetime as dt
 import json
+import platform as host_platform
+import socket
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
-from bump_ext import SchemaError, validate_entry  # noqa: E402
+from bump_ext import PipelineDB, SchemaError, validate_entry  # noqa: E402
 
 from . import cargo_assemble_entry as _assemble
 from . import cargo_classifier as _classifier
@@ -50,6 +53,9 @@ from . import cargo_regenerate as _regenerate
 from . import cargo_reproducer as _reproducer
 from . import cargo_toolchain as _toolchain
 from . import fat_image as _fat
+
+
+CLASSIFIER_VERSION = "cargo_classifier@v0.1"
 
 
 MSRV_FLOOR = "1.56"  # edition-2021; any real Cargo project needs at least this.
@@ -114,18 +120,56 @@ def append_state(path: Path, record: DriveRecord) -> None:
         f.write(json.dumps(dataclasses.asdict(record)) + "\n")
 
 
+def _docker_platform() -> str:
+    mach = host_platform.machine().lower()
+    arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(mach, mach)
+    sys_name = host_platform.system().lower()
+    return f"{sys_name}/{arch}"
+
+
+def _git_sha() -> str:
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(Path(__file__).resolve().parents[2]),
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _mirror_drive_state(db: PipelineDB, run_id: str, rec: DriveRecord) -> None:
+    db.upsert_drive_state(
+        run_id=run_id,
+        candidate_key=rec.candidate_key,
+        status=rec.status,
+        entry_path=rec.entry_path,
+        fat_image_tag=rec.fat_image_tag,
+        rust_msrv=rec.rust_msrv,
+        commit_date=rec.commit_date,
+        reason=rec.reason,
+        updated_at=rec.timestamp or None,
+    )
+
+
 # ---- candidate metadata (MSRV + commit date) --------------------------------
 # The candidate-generation step (cargo_miner.py, rebatchi_to_candidate.py)
 # enriches each candidate with `rust_msrv` + `post_commit_date` when
 # possible. The driver reads those fields directly and falls back to a
 # single GitHub API call per missing field.
 
-def _resolve_metadata(candidate: dict) -> tuple[str, dt.date | None]:
-    """Return (rust_msrv, commit_date). Uses candidate fields if present,
-    falls back to GitHub API for whichever is missing."""
+def _resolve_metadata(candidate: dict) -> tuple[str, bool, dt.date | None]:
+    """Return (rust_msrv, msrv_detected, commit_date).
+
+    `msrv_detected` is False when we fell back to MSRV_FLOOR because the
+    project declared nothing at the post-commit. True means rust-toolchain /
+    Cargo.toml's rust-version supplied the value.
+    """
     msrv = candidate.get("rust_msrv")
     if msrv is None:
         msrv = _toolchain.msrv_at_commit(candidate["repo"], candidate["post_commit"])
+    detected = msrv is not None
     if msrv is None:
         msrv = MSRV_FLOOR
 
@@ -139,7 +183,7 @@ def _resolve_metadata(candidate: dict) -> tuple[str, dt.date | None]:
         except ValueError:
             commit_date = None
 
-    return msrv, commit_date
+    return msrv, detected, commit_date
 
 
 # ---- per-candidate flow -----------------------------------------------------
@@ -147,14 +191,16 @@ def _resolve_metadata(candidate: dict) -> tuple[str, dt.date | None]:
 def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
             build_missing_bases: bool, regenerate_verify: bool,
             timeout_s: int, host_label: str | None,
-            max_sde_date: dt.date) -> DriveRecord:
+            max_sde_date: dt.date,
+            db: PipelineDB | None = None,
+            run_id: str | None = None) -> DriveRecord:
     key = _key(candidate)
     now = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     rec = DriveRecord(candidate_key=key, status="", timestamp=now,
                       max_sde_date=max_sde_date.isoformat())
 
     # --- 1a/1b: MSRV + commit date (candidate fields first, GH fallback) ---
-    rust_msrv, commit_date = _resolve_metadata(candidate)
+    rust_msrv, msrv_detected, commit_date = _resolve_metadata(candidate)
     if commit_date is None:
         rec.status = Status.METADATA_FETCH_FAILED
         rec.reason = "could not fetch commit date via GitHub API"
@@ -255,6 +301,10 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
             source_date_epoch=resolve_match.sourceDateEpoch,
             build_flags=["--locked", "--offline"],
             record_fat_digest=False,
+            ecosystem_metadata={
+                "rustMsrv": rust_msrv,
+                "rustMsrvDetected": msrv_detected,
+            },
         )
     except _assemble.AssembleError as e:
         rec.status = Status.ASSEMBLE_FAILED
@@ -266,6 +316,54 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
     out = EntryWriter(out_dir).write(entry)
     rec.entry_path = str(out)
     print(f"[{key}] wrote {out}", file=sys.stderr)
+
+    # ---- DB mirror (optional) ----
+    # Entry is on disk → index it. Record the reproduction attempt under
+    # this run. Seed the classification row if we classified. Keep this
+    # additive; JSONL stays primary.
+    if db is not None:
+        entry_id = db.upsert_entry_from_json(Path(out))
+        db.patch_entry_metadata(
+            entry_id,
+            post_commit_date=rec.commit_date,
+            rust_msrv=rec.rust_msrv,
+            msrv_detected=msrv_detected,
+        )
+        db.upsert_ingestion_source(
+            entry_id=entry_id,
+            source=candidate.get("source") or "unknown",
+            source_ref=key,
+            ingested_by="cargo_drive.py",
+        )
+        db.record_attempt(
+            entry_id=entry_id,
+            run_id=run_id,
+            host_id=host_label or socket.gethostname(),
+            host_os=host_platform.system().lower(),
+            host_arch=_docker_platform(),
+            started_at=now,
+            finished_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            fat_image_tag_used=resolve_match.tag,
+            fingerprint_expected=resolve_match.environmentFingerprint,
+            fingerprint_actual=resolve_match.environmentFingerprint,
+            fingerprint_matched=True,
+            pre_exit_code=repro.pre_exit_code,
+            post_exit_code=repro.post_exit_code,
+            fix_exit_code=repro.fix_exit_code,
+            outcome_matched=repro.matches_category(discovered_category),
+            pre_log_path=repro.pre_log_path,
+            post_log_path=repro.post_log_path,
+            fix_log_path=repro.fix_log_path,
+        )
+        if classification_dict is not None:
+            db.seed_classification_if_absent(
+                entry_id=entry_id,
+                classifier_version=CLASSIFIER_VERSION,
+                classifier_git_sha="",
+                top_category=classification_dict.get("topCategory") or "OTHER",
+                sub_category=classification_dict.get("subCategory"),
+                error_codes=classification_dict.get("errorCodes") or [],
+            )
 
     # --- 1g: regenerate-verify ---
     if regenerate_verify:
@@ -288,9 +386,11 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
 def main() -> int:
     p = argparse.ArgumentParser(description="End-to-end Cargo pipeline driver.")
     p.add_argument("--candidates", required=True, help="JSONL of candidates (cargo_miner.py format).")
-    p.add_argument("--out-dir", default="data/cargo", help="Where to write entry JSONs.")
-    p.add_argument("--logs-dir", default="data/cargo/logs", help="Where reproducer logs land.")
-    p.add_argument("--state", default="data/cargo/drive-state.jsonl",
+    p.add_argument("--out-dir", default="data/cargo", help="Where to write entry JSONs. "
+                   "Note: data/cargo/ is a submodule (dep-updates-rp-data); writes land there.")
+    p.add_argument("--logs-dir", default="data/cargo-logs", help="Where reproducer logs land. "
+                   "Kept outside the submodule — logs are transient dev artefacts, not Layer 1.")
+    p.add_argument("--state", default="data/cargo-logs/drive-state.jsonl",
                    help="State file for resumability.")
     p.add_argument("--build-missing-bases", action="store_true",
                    help="Auto-build a fat image when no existing one covers a candidate.")
@@ -308,6 +408,13 @@ def main() -> int:
                         "commit_after_max_sde_date. Default: Dec 31 of last year. "
                         "This is a run-level parameter — keep stable across a batch "
                         "so tags are deterministic.")
+    p.add_argument("--db", default=None,
+                   help="Optional path to pipeline.sqlite. When set, mirrors "
+                        "drive_state + reproduction_attempts + classifications + "
+                        "entries alongside the JSONL. JSONL stays primary.")
+    p.add_argument("--run-id", default=None,
+                   help="Run identifier written to the DB. Defaults to "
+                        "'drive-<host>-<ISO timestamp>'. Ignored without --db.")
     args = p.parse_args()
 
     max_sde_date = args.max_sde_date or _fat.default_max_sde_date()
@@ -328,36 +435,61 @@ def main() -> int:
     counts = {"skipped": 0, "processed": 0}
     status_counts: dict[str, int] = {}
 
-    with Path(args.candidates).open() as f:
-        n = 0
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            candidate = json.loads(line)
-            key = _key(candidate)
+    db: PipelineDB | None = None
+    run_id: str | None = None
+    if args.db:
+        db = PipelineDB(Path(args.db))
+        host = args.host or socket.gethostname()
+        run_id = args.run_id or f"drive-{host}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        db.start_run(
+            run_id=run_id,
+            host=host,
+            git_sha=_git_sha(),
+            candidates_source=str(Path(args.candidates).resolve()),
+            max_sde_date=max_sde_date,
+            python_version=host_platform.python_version(),
+        )
+        print(f"db: {args.db}  run_id={run_id}", file=sys.stderr)
 
-            if key in existing and existing[key].status in terminal:
-                counts["skipped"] += 1
-                continue
+    try:
+        with Path(args.candidates).open() as f:
+            n = 0
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                candidate = json.loads(line)
+                key = _key(candidate)
 
-            rec = process(
-                candidate,
-                out_dir=out_dir, logs_dir=logs_dir,
-                build_missing_bases=args.build_missing_bases,
-                regenerate_verify=args.regenerate_verify,
-                timeout_s=args.timeout,
-                host_label=args.host,
-                max_sde_date=max_sde_date,
-            )
-            append_state(state_path, rec)
-            counts["processed"] += 1
-            status_counts[rec.status] = status_counts.get(rec.status, 0) + 1
-            print(f"[{key}] → {rec.status}" + (f"  ({rec.reason})" if rec.reason else ""), file=sys.stderr)
+                if key in existing and existing[key].status in terminal:
+                    counts["skipped"] += 1
+                    continue
 
-            n += 1
-            if args.limit and n >= args.limit:
-                break
+                rec = process(
+                    candidate,
+                    out_dir=out_dir, logs_dir=logs_dir,
+                    build_missing_bases=args.build_missing_bases,
+                    regenerate_verify=args.regenerate_verify,
+                    timeout_s=args.timeout,
+                    host_label=args.host,
+                    max_sde_date=max_sde_date,
+                    db=db,
+                    run_id=run_id,
+                )
+                append_state(state_path, rec)
+                if db is not None and run_id is not None:
+                    _mirror_drive_state(db, run_id, rec)
+                counts["processed"] += 1
+                status_counts[rec.status] = status_counts.get(rec.status, 0) + 1
+                print(f"[{key}] → {rec.status}" + (f"  ({rec.reason})" if rec.reason else ""), file=sys.stderr)
+
+                n += 1
+                if args.limit and n >= args.limit:
+                    break
+    finally:
+        if db is not None and run_id is not None:
+            db.finish_run(run_id)
+            db.close()
 
     print("", file=sys.stderr)
     print(f"summary: skipped={counts['skipped']}  processed={counts['processed']}", file=sys.stderr)

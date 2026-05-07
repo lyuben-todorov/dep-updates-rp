@@ -1,6 +1,9 @@
 .env
 __pycache__/
 *.pyc
-data/cargo/logs/
-data/cargo/dockerfiles/
+data/cargo-logs/
+data/cargo-dockerfiles/
 data/rebatchi/
+data/pipeline.sqlite
+data/pipeline.sqlite-wal
+data/pipeline.sqlite-shm

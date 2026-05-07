@@ -228,7 +228,7 @@ def reproduce(candidate: dict, logs_dir: Path, toolchain: str | None, timeout_s:
 def main() -> int:
     p = argparse.ArgumentParser(description="Reproduce a Cargo breaking-update candidate in Docker.")
     p.add_argument("--in", dest="inp", required=True, help="Candidate JSONL (one candidate = one line).")
-    p.add_argument("--logs-dir", default="./data/cargo/logs")
+    p.add_argument("--logs-dir", default="./data/cargo-logs")
     p.add_argument("--out", default="-", help="Output JSONL of reproduction results.")
     p.add_argument(
         "--toolchain",

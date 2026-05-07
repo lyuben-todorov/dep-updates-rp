@@ -74,7 +74,11 @@ docker/
     repro-sources-list.sh   vendored apt-snapshot pinner (locally patched for buster-era)
     index.json              inventory of registered fat images
 data/
-  cargo/                    entry JSONs + per-entry reproduction logs
+  cargo/                    submodule → lyuben-todorov/dep-updates-rp-data
+                            canonical v0.0.4 entry JSONs (Zenodo-bound)
+  cargo-logs/               reproducer + driver logs (gitignored)
+  cargo-dockerfiles/        transient thin-image Dockerfiles (gitignored)
+  pipeline.sqlite           derived query index, rebuildable (gitignored)
   rebatchi/
     ds1_cargo_candidates.jsonl        DS1 filter output (pre-enrichment)
     ds1_candidates_enriched.jsonl     full DS1, enriched (msrv + commit_date), --require-cargo filtered
@@ -96,13 +100,17 @@ CHANGELOG.md
 ## Quick start
 
 ```bash
-# 1. Install the shared library (editable, with Cargo extras).
+# 1. Clone with submodules (data/cargo/ is a submodule).
+git clone --recurse-submodules <repo-url> && cd dep-updates-poc
+# If you already cloned: git submodule update --init
+
+# 2. Install the shared library (editable, with Cargo extras).
 pip install -e '.[cargo]'
 
-# 2. Set a GitHub token (for candidate enrichment + commit-date lookups).
+# 3. Set a GitHub token (for candidate enrichment + commit-date lookups).
 export GITHUB_TOKEN=<your_pat>
 
-# 3. Run a small batch end-to-end against the bundled test slice.
+# 4. Run a small batch end-to-end against the bundled test slice.
 python3 -m pipelines.cargo.cargo_drive \
   --candidates data/rebatchi/ds1_candidates_enriched_500.jsonl \
   --out-dir /tmp/drive-out \
@@ -119,7 +127,8 @@ batch drive → verification), see
 
 ## Proof it works
 
-Two real v0.0.4 entries committed under `data/cargo/`:
+Two real v0.0.4 entries live in the `data/cargo/` submodule
+([`lyuben-todorov/dep-updates-rp-data`](https://github.com/lyuben-todorov/dep-updates-rp-data)):
 
 - `cargo-9ac20c07.json` — `fstubner/netscli#22`, Dependabot
   `ipnetwork 0.20 → 0.21`. Category `breaking`
@@ -141,8 +150,12 @@ Two real v0.0.4 entries committed under `data/cargo/`:
 
 ## Status
 
-**v0.0.4 — category-neutral schema + fat-image internals refactor.**
-Full DS1 enrichment (2608 candidates) completed; plan proposes 5 fat
-images to cover the dataset. Next milestones: DB layer over the
-entries/state/candidates, deployment story for a second machine running
-the batch unattended.
+**v0.0.4 — category-neutral schema + fat-image internals refactor +
+SQLite index layer.**
+Full DS1 enrichment (2608 candidates) completed; plan proposes 4 fat
+images to cover the dataset. Layer 1 extracted to its own repo
+(`dep-updates-rp-data`, wired in as a submodule at `data/cargo/`).
+`PipelineDB` / `rebuild_index.py` / `verify_index.py` shipped;
+`cargo_drive` has optional `--db` mirror. Next milestones: 500-slice
+dry run, then the full DS1 batch on a VM; deploy script for a fresh
+machine.

@@ -235,6 +235,19 @@ def run_tests(tag: str, timeout_s: int) -> int:
     return r.returncode
 
 
+def _remove_thin_images(tags: list[str]) -> None:
+    """Best-effort `docker image rm -f` for each tag. Silently ignores
+    missing images — thin builds may have failed partway. At ~5 GB per
+    thin image, not deleting these fills disk inside a few dozen entries."""
+    for tag in tags:
+        if tag is None:
+            continue
+        subprocess.run(
+            ["docker", "image", "rm", "-f", tag],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+
 # ---- entry update ------------------------------------------------------------
 
 def append_verified_on(entry: dict, record: dict) -> None:
@@ -255,7 +268,8 @@ def detect_platform() -> str:
 # ---- main flow ---------------------------------------------------------------
 
 def regenerate(entry_path: Path, *, build_missing_bases: bool, skip_tests: bool,
-               host_label: str | None, timeout_s: int, builder: str) -> int:
+               host_label: str | None, timeout_s: int, builder: str,
+               keep_thin_images: bool = False) -> int:
     with entry_path.open() as f:
         entry = json.load(f)
 
@@ -340,54 +354,62 @@ def regenerate(entry_path: Path, *, build_missing_bases: bool, skip_tests: bool,
     post_tag = f"rp2026/cargo-thin:{short}-post"
     fix_tag = f"rp2026/cargo-thin:{short}-fix" if fix_commit else None
 
-    with tempfile.TemporaryDirectory() as td:
-        ctx = Path(td)
-        pre_df = _write_thin_dockerfile(ctx, repo_url, pre_commit, tag, build_flags)
-        post_df = _write_thin_dockerfile(ctx, repo_url, post_commit, tag, build_flags)
-        fix_df = _write_thin_dockerfile(ctx, repo_url, fix_commit, tag, build_flags) if fix_commit else None
-
-        try:
-            build_thin_image(pre_df, pre_tag, ctx)
-            build_thin_image(post_df, post_tag, ctx)
-            if fix_df:
-                build_thin_image(fix_df, fix_tag, ctx)
-        except RegenerateError as e:
-            print(f"ERROR: {e}", file=sys.stderr)
-            return EXIT_THIN_BUILD_FAILED
-
+    # Thin images are ~5 GB each — a single entry's pre/post/fix can pin
+    # 15 GB. Clean up on every exit path unless --keep-thin-images is set.
+    # If a build fails partway, earlier-built thins still get removed.
+    thin_tags = [t for t in (pre_tag, post_tag, fix_tag) if t]
     outcome_match: bool | None = None
-    if not skip_tests:
-        print("  running pre test...", file=sys.stderr)
-        pre_rc = run_tests(pre_tag, timeout_s)
-        print(f"  pre exit: {pre_rc}", file=sys.stderr)
-        print("  running post test...", file=sys.stderr)
-        post_rc = run_tests(post_tag, timeout_s)
-        print(f"  post exit: {post_rc}", file=sys.stderr)
-        fix_rc: int | None = None
-        if fix_tag:
-            print("  running fix test...", file=sys.stderr)
-            fix_rc = run_tests(fix_tag, timeout_s)
-            print(f"  fix exit: {fix_rc}", file=sys.stderr)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ctx = Path(td)
+            pre_df = _write_thin_dockerfile(ctx, repo_url, pre_commit, tag, build_flags)
+            post_df = _write_thin_dockerfile(ctx, repo_url, post_commit, tag, build_flags)
+            fix_df = _write_thin_dockerfile(ctx, repo_url, fix_commit, tag, build_flags) if fix_commit else None
 
-        # Expected pass/fail pattern per category:
-        #   breaking:         pre pass, post fail
-        #   non-breaking:     pre pass, post pass
-        #   fix-after-update: pre pass, post fail, fix pass
-        cat = entry["category"]
-        pre_ok = (pre_rc == 0)
-        post_ok = (post_rc == 0)
-        fix_ok = (fix_rc == 0) if fix_rc is not None else None
-        if cat == "breaking":
-            reproduced = pre_ok and not post_ok
-        elif cat == "non-breaking":
-            reproduced = pre_ok and post_ok
-        elif cat == "fix-after-update":
-            reproduced = pre_ok and not post_ok and fix_ok is True
-        else:
-            reproduced = False
-        outcome_match = reproduced
-        tag_str = "match" if outcome_match else "MISMATCH"
-        print(f"  outcome: category={cat}, reproduced={reproduced} [{tag_str}]", file=sys.stderr)
+            try:
+                build_thin_image(pre_df, pre_tag, ctx)
+                build_thin_image(post_df, post_tag, ctx)
+                if fix_df:
+                    build_thin_image(fix_df, fix_tag, ctx)
+            except RegenerateError as e:
+                print(f"ERROR: {e}", file=sys.stderr)
+                return EXIT_THIN_BUILD_FAILED
+
+        if not skip_tests:
+            print("  running pre test...", file=sys.stderr)
+            pre_rc = run_tests(pre_tag, timeout_s)
+            print(f"  pre exit: {pre_rc}", file=sys.stderr)
+            print("  running post test...", file=sys.stderr)
+            post_rc = run_tests(post_tag, timeout_s)
+            print(f"  post exit: {post_rc}", file=sys.stderr)
+            fix_rc: int | None = None
+            if fix_tag:
+                print("  running fix test...", file=sys.stderr)
+                fix_rc = run_tests(fix_tag, timeout_s)
+                print(f"  fix exit: {fix_rc}", file=sys.stderr)
+
+            # Expected pass/fail pattern per category:
+            #   breaking:         pre pass, post fail
+            #   non-breaking:     pre pass, post pass
+            #   fix-after-update: pre pass, post fail, fix pass
+            cat = entry["category"]
+            pre_ok = (pre_rc == 0)
+            post_ok = (post_rc == 0)
+            fix_ok = (fix_rc == 0) if fix_rc is not None else None
+            if cat == "breaking":
+                reproduced = pre_ok and not post_ok
+            elif cat == "non-breaking":
+                reproduced = pre_ok and post_ok
+            elif cat == "fix-after-update":
+                reproduced = pre_ok and not post_ok and fix_ok is True
+            else:
+                reproduced = False
+            outcome_match = reproduced
+            tag_str = "match" if outcome_match else "MISMATCH"
+            print(f"  outcome: category={cat}, reproduced={reproduced} [{tag_str}]", file=sys.stderr)
+    finally:
+        if not keep_thin_images:
+            _remove_thin_images(thin_tags)
 
     # --- 5. Append verifiedOn + write ---
     record = {
@@ -428,6 +450,9 @@ def main() -> int:
     p.add_argument("--timeout", type=int, default=1800, help="Test timeout per image (s).")
     p.add_argument("--builder", default="desktop-linux",
                    help="docker buildx builder to use when building the fat image.")
+    p.add_argument("--keep-thin-images", action="store_true",
+                   help="Don't remove thin images after running. Default: remove "
+                        "(they are ~5 GB each and pile up fast across a batch).")
     args = p.parse_args()
 
     if not shutil.which("docker"):
@@ -441,6 +466,7 @@ def main() -> int:
         host_label=args.host,
         timeout_s=args.timeout,
         builder=args.builder,
+        keep_thin_images=args.keep_thin_images,
     )
 
 
