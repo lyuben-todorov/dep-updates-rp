@@ -22,6 +22,7 @@ from .models import (
 )
 from .writer import EntryWriter
 from .validate import validate_entry, SchemaError
+from .db import PipelineDB
 
 __all__ = [
     "Entry",
@@ -47,6 +48,7 @@ __all__ = [
     "EntryWriter",
     "validate_entry",
     "SchemaError",
+    "PipelineDB",
 ]
 
 SCHEMA_VERSION = "0.0.4"

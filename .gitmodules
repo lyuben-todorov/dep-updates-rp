@@ -1,0 +1,3 @@
+[submodule "data/cargo"]
+	path = data/cargo
+	url = git@github.com:lyuben-todorov/dep-updates-rp-data.git

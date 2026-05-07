@@ -28,9 +28,14 @@ df -h ~                                         # check available disk
 ## Step 1 — Clone + install
 
 ```bash
-git clone <repo-url> rp2026 && cd rp2026/dep-updates-poc
+git clone --recurse-submodules <repo-url> rp2026 && cd rp2026/dep-updates-poc
 pip install -e '.[cargo]'
 ```
+
+`data/cargo/` is a git submodule pointing at
+[`lyuben-todorov/dep-updates-rp-data`](https://github.com/lyuben-todorov/dep-updates-rp-data)
+— the canonical v0.0.4 entry JSONs. If you cloned without
+`--recurse-submodules`, run `git submodule update --init` now.
 
 Dependencies pulled: `pydantic>=2`, `jsonschema`, `requests`,
 `tomllib` (stdlib on 3.11+).
@@ -165,17 +170,26 @@ don't exist there; bookworm+ gets GUI by default).
 ## Step 6 — Drive the batch
 
 ```bash
-mkdir -p data/cargo/logs data/rebatchi/batch
+mkdir -p data/cargo-logs data/rebatchi/batch
 
 python3 -m pipelines.cargo.cargo_drive \
   --candidates data/rebatchi/ds1_candidates_enriched.jsonl \
   --out-dir data/cargo/ \
-  --logs-dir data/cargo/logs/ \
+  --logs-dir data/cargo-logs/ \
   --state data/rebatchi/batch/drive-state.jsonl \
+  --db data/pipeline.sqlite \
+  --run-id ds1-$(date +%Y%m%d)-$(hostname) \
+  --max-sde-date 2023-12-31 \
   --timeout 1800 \
   --host $(hostname) \
   2>&1 | tee data/rebatchi/batch/drive.log
 ```
+
+Note: `--out-dir data/cargo/` writes into the submodule working tree.
+To publish entries, `cd data/cargo && git commit + push` after the run
+(or in batches during a long run). `--db` mirrors drive state +
+reproduction attempts + entries into `data/pipeline.sqlite` for
+querying; the JSONL remains authoritative for resume logic.
 
 Per-candidate work:
 - ~5 min reproduction (pre + post commits inside Docker, `cargo test`).
@@ -266,9 +280,10 @@ line from the state file.
 ### Parallelism
 
 The `--parallel N` flag in `cargo_drive.py` is a stub — it prints a
-warning and serializes anyway. Docker builds serialize on the daemon,
-so real parallelism requires multiple Docker engines. Not worth
-engineering yet.
+warning and serializes anyway. For real parallelism, run N driver
+processes over disjoint candidate chunks with separate state files
+against the same `--db`. Expect 2-4× throughput on a 16-core VM
+before hitting RAM / CPU contention on `cargo test` workloads.
 
 ## Troubleshooting
 
@@ -337,16 +352,19 @@ existed on that release. See
 ## Expected artifacts at the end
 
 ```
-data/cargo/
+data/cargo/                (submodule → dep-updates-rp-data)
   cargo-<hash>.json        one per ok-status candidate (hundreds to low thousands)
-  logs/
-    <hash>-pre.log         cargo test output for pre commit
-    <hash>-post.log        cargo test output for post commit
-    <hash>-fix.log         only for fix-after-update entries
+
+data/cargo-logs/
+  <hash>-pre.log           cargo test output for pre commit
+  <hash>-post.log          cargo test output for post commit
+  <hash>-fix.log           only for fix-after-update entries
 
 data/rebatchi/batch/
   drive-state.jsonl        per-candidate: {status, fat_image_tag, reason, timestamp}
   drive.log                full stderr stream
+
+data/pipeline.sqlite       SQLite index (only if --db was set; gitignored)
 
 docker/cargo-fat/
   index.json               append-only registry of built fat images
@@ -367,21 +385,27 @@ jq -r '.fat_image_tag' data/rebatchi/batch/drive-state.jsonl | sort | uniq -c
 
 ## Shipping the results
 
-Entries + state file + logs + fat-image index are the full benchmark
-artifact. Zip `data/cargo/*.json`, `data/rebatchi/batch/*.jsonl`,
-`docker/cargo-fat/index.json` → Zenodo DOI. Images themselves never
-shipped (supervisor's directive); anyone with the DOI + the repo can
-regenerate the images locally from the index.
+Entries live in the `data/cargo/` submodule
+(`lyuben-todorov/dep-updates-rp-data`). Publishing:
+
+1. `cd data/cargo && git add cargo-*.json && git commit -m "Run <run-id>: N entries" && git push`.
+2. Tag a release on the data repo for the Zenodo drop
+   (`git tag v0.0.4-ds1 && git push --tags`); Zenodo picks up GitHub
+   release tags automatically if the integration is enabled.
+3. From the main repo, bump the submodule pointer + commit:
+   `git add data/cargo && git commit -m "Bump data submodule to <tag>"`.
+
+Images are never shipped — anyone with the repo (+ data submodule) can
+rebuild them from `docker/cargo-fat/index.json` + the Dockerfile.
 
 ## When things finish
 
 Next logical steps (not covered here):
 
-1. Populate a SQLite index over the entries for easy querying. See
-   `../../../docs/db-design.md`.
-2. Cross-host regenerate-verify on a different architecture (x86_64 if
+1. Cross-host regenerate-verify on a different architecture (x86_64 if
    the batch ran on arm64, or vice versa). Each run appends to
    `verifiedOn[]`; after N hosts verify an entry, it's
    cross-host-reproducible.
-3. Write up the reproduction rate per (year, milestone, debian) cell.
-   Drive-state's `status` + `fat_image_tag` is the data you need.
+2. Write up the reproduction rate per (year, milestone, debian) cell.
+   `reproduction_attempts` in the SQLite index + `drive_state`'s
+   `status` + `fat_image_tag` are the data you need.

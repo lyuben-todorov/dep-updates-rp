@@ -153,9 +153,13 @@ writing.
 ```
 python3 -m pipelines.cargo.cargo_regenerate \
   --entry data/cargo/cargo-<id>.json \
-  [--build-missing-bases] [--skip-tests] \
+  [--build-missing-bases] [--skip-tests] [--keep-thin-images] \
   --host $(hostname)
 ```
+
+`--keep-thin-images` disables the default post-run cleanup. Thin images
+are ~5 GB each; cleanup runs in a `try/finally` so images are removed
+even if tests fail or the process is interrupted.
 
 1. Reads `reproduction.fatImage` from the entry. Constructs the
    canonical tag. If not locally present, requires
@@ -239,11 +243,19 @@ rejected as `commit_too_recent`; default `default_max_sde_date()`).
 python3 -m pipelines.cargo.cargo_drive \
   --candidates candidates.jsonl \
   --out-dir data/cargo/ \
-  --logs-dir data/cargo/logs/ \
-  --state data/drive-state.jsonl \
+  --logs-dir data/cargo-logs/ \
+  --state data/cargo-logs/drive-state.jsonl \
   [--build-missing-bases] [--regenerate-verify] \
-  [--limit N] [--host label]
+  [--limit N] [--host label] [--max-sde-date YYYY-MM-DD] \
+  [--db data/pipeline.sqlite] [--run-id <run-id>]
 ```
+
+With `--db` set, the driver opens a row in `runs`, mirrors
+`drive_state` on every terminal record, and on successful entries
+writes `entries` + `ingestion_sources` + `reproduction_attempts` and
+seeds `classifications`. JSONL stays primary for resumability; the
+DB is a rebuildable index. `--run-id` defaults to
+`drive-<host>-<timestamp>`.
 
 Per candidate:
 

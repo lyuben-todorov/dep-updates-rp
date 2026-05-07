@@ -159,6 +159,7 @@ def build_entry(
     source_date_epoch: int,
     build_flags: list[str],
     record_fat_digest: bool,
+    ecosystem_metadata: dict | None = None,
 ) -> Entry:
     """Build a v0.0.4 Entry.
 
@@ -253,7 +254,7 @@ def build_entry(
         ),
         reproduction=repro_obj,
         failure=fail_obj,
-        ecosystemMetadata={},
+        ecosystemMetadata=ecosystem_metadata or {},
     )
 
 
