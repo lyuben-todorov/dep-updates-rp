@@ -10,8 +10,11 @@ Schema shape notes:
   rebuilds thin images on demand from the `fatImage` inputs.
 - `reproduction.fatImage` records the regenerator's inputs (rustVersion,
   SDE, apt snapshot, Debian release).
-- `reproduction.environmentFingerprint` is extracted from /manifest/* inside
-  the fat image at assembly time. This is the reproducibility contract.
+- `reproduction.environmentFingerprints` is extracted from /manifest/*
+  inside the fat image at assembly time. The assembler stamps a
+  single-entry list tagged by the fat image's container platform
+  (detected via `docker image inspect`). Other architectures get their
+  fingerprints appended later by cargo_regenerate when first verified.
 - `reproduction.verifiedOn` starts empty; entries earn verification records
   each time `cargo_regenerate.py` runs and matches the fingerprint.
 """
@@ -102,6 +105,18 @@ def fat_image_digest(tag: str) -> str | None:
     return r.stdout.strip()
 
 
+def _detect_container_platform(tag: str) -> str:
+    """Container platform (linux/<arch>) of a built fat image."""
+    r = subprocess.run(
+        ["docker", "image", "inspect", "--format",
+         "{{.Os}}/{{.Architecture}}{{if .Variant}}/{{.Variant}}{{end}}", tag],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        raise AssembleError(f"could not detect container platform for {tag}")
+    return r.stdout.strip()
+
+
 def derive_fat_image_fields(manifest_dir: Path) -> tuple[str, str, str]:
     """Returns (rust_version, apt_snapshot, debian_release) parsed from /manifest/*.
 
@@ -188,6 +203,7 @@ def build_entry(
             digest, files, rustc_first, pkg_count = compute_fingerprint(manifest_dir)
 
         expected_digest = fat_image_digest(fat_image_tag) if record_fat_digest else None
+        container_platform = _detect_container_platform(fat_image_tag)
 
         repro_obj = Reproduction(
             fatImage=FatImage(
@@ -198,12 +214,13 @@ def build_entry(
                 expectedDigest=expected_digest,
             ),
             buildFlags=build_flags,
-            environmentFingerprint=EnvironmentFingerprint(
+            environmentFingerprints=[EnvironmentFingerprint(
+                platform=container_platform,
                 digest=digest,
                 files=files,
                 rustcVersion=rustc_first,
                 packageCount=pkg_count,
-            ),
+            )],
             thinImages=None,
             verifiedOn=[],
         )

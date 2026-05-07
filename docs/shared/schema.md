@@ -27,7 +27,7 @@ pr                      — { url, number, author, authorType, botType, merged, 
 commits                 — { pre, post, fix?, preAuthorType?, postAuthorType?, fixAuthorType? }
 update                  — { dependencyName, previousVersion, newVersion,
                             versionUpdateType, scope }
-reproduction            — { fatImage, buildFlags, environmentFingerprint,
+reproduction            — { fatImage, buildFlags, environmentFingerprints[],
                             thinImages?, verifiedOn[] }   (null when unreproducible)
 failure                 — { topCategory, subCategory, errorCodes }   (null for non-breaking)
 ecosystemMetadata       — open object, per-ecosystem extras
@@ -44,7 +44,7 @@ thousands of entries).
 
 ### `schemaVersion`
 
-Semver. Current: `"0.0.4"`. Incompatible entries must be migrated
+Semver. Current: `"0.0.5"`. Incompatible entries must be migrated
 before consumption.
 
 ### `category`
@@ -110,18 +110,21 @@ The core of the Fork B reproducibility contract. Null when the entry is
     "expectedDigest": "sha256:…"
   },
   "buildFlags": ["--locked", "--offline"],
-  "environmentFingerprint": {
-    "digest": "sha256:…",
-    "files": [
-      {"path": "/manifest/packages.txt", "sha256": "…", "bytes": 22866},
-      {"path": "/manifest/rustc.txt",     "sha256": "…", "bytes": 197},
-      {"path": "/manifest/cargo.txt",     "sha256": "…", "bytes": 329},
-      {"path": "/manifest/os-release",    "sha256": "…", "bytes": 267},
-      {"path": "/manifest/sources.list",  "sha256": "…", "bytes": 326}
-    ],
-    "rustcVersion": "rustc 1.56.0 (09c42c458 2021-10-18)",
-    "packageCount": 456
-  },
+  "environmentFingerprints": [
+    {
+      "platform": "linux/arm64",
+      "digest": "sha256:…",
+      "files": [
+        {"path": "/manifest/packages.txt", "sha256": "…", "bytes": 22866},
+        {"path": "/manifest/rustc.txt",     "sha256": "…", "bytes": 197},
+        {"path": "/manifest/cargo.txt",     "sha256": "…", "bytes": 329},
+        {"path": "/manifest/os-release",    "sha256": "…", "bytes": 267},
+        {"path": "/manifest/sources.list",  "sha256": "…", "bytes": 326}
+      ],
+      "rustcVersion": "rustc 1.56.0 (09c42c458 2021-10-18)",
+      "packageCount": 456
+    }
+  ],
   "thinImages": {
     "expectedPre": "sha256:…",
     "expectedPost": "sha256:…",
@@ -146,10 +149,13 @@ The core of the Fork B reproducibility contract. Null when the entry is
   pinned inputs).
 - **`buildFlags`** — exact flags passed to `cargo test`. Recorded so an
   updated pipeline can't silently change them.
-- **`environmentFingerprint`** — the reproducibility check. The fat
-  image emits `/manifest/*` in a fixed order; consumers rebuild,
-  re-extract, recompute the sha256, assert equality. **Mismatch is a
-  hard fail.**
+- **`environmentFingerprints`** — the reproducibility check, per
+  container platform. The fat image emits `/manifest/*` in a fixed
+  order; consumers rebuild, re-extract, recompute the sha256, and look
+  up the expected digest by their host's container platform
+  (`linux/arm64`, `linux/amd64`, ...). **Mismatch for a recorded
+  platform is a hard fail.** A container platform not yet in the list
+  is appended on first run (first-verification mode for a new arch).
 - **`thinImages`** — optional advisory digests for the per-entry
   `<hash>-pre` / `<hash>-post` / `<hash>-fix` images. Mismatch is *not*
   a fail; this is for cross-host reproducibility studies.

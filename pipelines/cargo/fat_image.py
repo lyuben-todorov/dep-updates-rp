@@ -105,14 +105,20 @@ def default_max_sde_date(today: dt.date | None = None) -> dt.date:
 # ---- data model --------------------------------------------------------------
 
 @dataclass(frozen=True)
+class FatImageFingerprint:
+    platform: str                # "linux/arm64" | "linux/amd64" | ...
+    digest: str                  # "sha256:..."
+    packageCount: int | None = None
+
+
+@dataclass(frozen=True)
 class FatImageRecord:
     tag: str
     rustVersion: str            # full patch version, e.g. "1.92.0"
     sourceDateEpoch: int
     aptSnapshot: str            # "YYYYMMDDTHHMMSSZ"
     debianRelease: str
-    environmentFingerprint: str # "sha256:..."
-    packageCount: int | None = None
+    environmentFingerprints: tuple[FatImageFingerprint, ...] = ()
     firstSeenAt: str | None = None  # YYYY-MM-DD
     notes: str | None = None
 
@@ -124,6 +130,12 @@ class FatImageRecord:
 
     def rust_tuple(self) -> tuple[int, int, int]:
         return parse_semver(self.rustVersion)
+
+    def fingerprint_for(self, platform: str) -> FatImageFingerprint | None:
+        for fp in self.environmentFingerprints:
+            if fp.platform == platform:
+                return fp
+        return None
 
 
 def parse_semver(v: str) -> tuple[int, int, int]:
@@ -368,8 +380,35 @@ def load_index(path: Path = INDEX_PATH) -> list[FatImageRecord]:
         raw = json.load(f)
     records: list[FatImageRecord] = []
     for item in raw.get("fatImages", []):
-        records.append(FatImageRecord(**item))
+        fps = tuple(
+            FatImageFingerprint(**fp) for fp in item.get("environmentFingerprints", [])
+        )
+        # Strip fields not handled by the dataclass; populate fingerprints.
+        kwargs = {k: v for k, v in item.items() if k not in ("environmentFingerprints",)}
+        kwargs["environmentFingerprints"] = fps
+        records.append(FatImageRecord(**kwargs))
     return records
+
+
+def _record_to_dict(r: FatImageRecord) -> dict:
+    """Emit the index-JSON shape. environmentFingerprints becomes a list of dicts."""
+    d = {
+        "tag": r.tag,
+        "rustVersion": r.rustVersion,
+        "sourceDateEpoch": r.sourceDateEpoch,
+        "aptSnapshot": r.aptSnapshot,
+        "debianRelease": r.debianRelease,
+        "environmentFingerprints": [dataclasses.asdict(fp) for fp in r.environmentFingerprints],
+    }
+    if r.firstSeenAt is not None:
+        d["firstSeenAt"] = r.firstSeenAt
+    if r.notes is not None:
+        d["notes"] = r.notes
+    # Drop None packageCount per-fingerprint to keep the JSON tidy.
+    for fp in d["environmentFingerprints"]:
+        if fp.get("packageCount") is None:
+            fp.pop("packageCount", None)
+    return d
 
 
 def save_index(records: Iterable[FatImageRecord], path: Path = INDEX_PATH) -> None:
@@ -378,12 +417,9 @@ def save_index(records: Iterable[FatImageRecord], path: Path = INDEX_PATH) -> No
         with path.open() as f:
             existing = json.load(f)
     out = {
-        "schemaVersion": existing.get("schemaVersion", "0.1.0"),
+        "schemaVersion": existing.get("schemaVersion", "0.2.0"),
         "description": existing.get("description", ""),
-        "fatImages": [
-            {k: v for k, v in dataclasses.asdict(r).items() if v is not None}
-            for r in records
-        ],
+        "fatImages": [_record_to_dict(r) for r in records],
     }
     with path.open("w") as f:
         json.dump(out, f, indent=2)
@@ -446,12 +482,31 @@ def build_fat_image(rust_version: str, sde: int, *,
     return tag
 
 
+def _detect_image_platform(tag: str) -> str:
+    """Return the container platform string for a built image, e.g. 'linux/arm64'.
+
+    Uses `docker image inspect` on the local image; returns OS + architecture
+    (and Variant when present, e.g. `linux/arm/v7`).
+    """
+    r = subprocess.run(
+        ["docker", "image", "inspect", "--format",
+         "{{.Os}}/{{.Architecture}}{{if .Variant}}/{{.Variant}}{{end}}", tag],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        raise IndexError(f"could not detect platform for {tag}")
+    return r.stdout.strip()
+
+
 def introspect_fat_image(tag: str) -> FatImageRecord:
     """Extract /manifest/* from a built fat image and synthesize a FatImageRecord.
 
-    Leaves firstSeenAt unset (caller stamps it). Caller also supplies SDE,
-    since it's not recoverable from the image alone.
+    Leaves firstSeenAt unset (caller stamps it). The returned record has a
+    single environmentFingerprints entry for the platform the image was built
+    for — additional platforms' fingerprints land via `register_fingerprint`.
     """
+    platform = _detect_image_platform(tag)
+
     with tempfile.TemporaryDirectory() as td:
         out = Path(td)
         r = subprocess.run(
@@ -497,9 +552,34 @@ def introspect_fat_image(tag: str) -> FatImageRecord:
         sourceDateEpoch=sde,
         aptSnapshot=apt_snapshot,
         debianRelease=debian_release,
-        environmentFingerprint=digest,
-        packageCount=pkg_count,
+        environmentFingerprints=(FatImageFingerprint(
+            platform=platform,
+            digest=digest,
+            packageCount=pkg_count,
+        ),),
     )
+
+
+def register_fingerprint(tag: str, fp: FatImageFingerprint,
+                         path: Path = INDEX_PATH) -> None:
+    """Add or replace a per-platform fingerprint on an existing fat-image record.
+
+    Raises IndexError if the tag isn't registered. Replaces an existing
+    fingerprint for the same platform (apt jitter can theoretically shift a
+    digest; we keep the latest).
+    """
+    records = load_index(path)
+    for i, r in enumerate(records):
+        if r.tag != tag:
+            continue
+        others = tuple(existing for existing in r.environmentFingerprints
+                       if existing.platform != fp.platform)
+        records[i] = dataclasses.replace(
+            r, environmentFingerprints=others + (fp,),
+        )
+        save_index(records, path)
+        return
+    raise IndexError(f"tag not registered: {tag}")
 
 
 # ---- CLI ---------------------------------------------------------------------
@@ -510,9 +590,13 @@ def _cli_list(args: argparse.Namespace) -> int:
         print("(no fat images registered)", file=sys.stderr)
         return 0
     w_tag = max(len(r.tag) for r in records)
-    print(f"{'TAG'.ljust(w_tag)}  RUST       SNAPSHOT           DEBIAN     FINGERPRINT")
+    print(f"{'TAG'.ljust(w_tag)}  RUST       SNAPSHOT           DEBIAN     PLATFORMS")
     for r in records:
-        print(f"{r.tag.ljust(w_tag)}  {r.rustVersion:<9}  {r.aptSnapshot}  {r.debianRelease:<9}  {r.environmentFingerprint[:19]}...")
+        if r.environmentFingerprints:
+            platforms = ", ".join(f"{fp.platform}={fp.digest[7:15]}" for fp in r.environmentFingerprints)
+        else:
+            platforms = "(no fingerprints recorded)"
+        print(f"{r.tag.ljust(w_tag)}  {r.rustVersion:<9}  {r.aptSnapshot}  {r.debianRelease:<9}  {platforms}")
     return 0
 
 

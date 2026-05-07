@@ -41,6 +41,9 @@ import platform as host_platform
 import socket
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -139,6 +142,15 @@ def _git_sha() -> str:
         return ""
 
 
+def _ledger_digest_for_this_host(record) -> str | None:
+    """Look up the fat-image fingerprint in the ledger matching this host's
+    container platform. None if the ledger record has no fingerprint for
+    this arch (e.g. fresh VM, only this-arch-now-building)."""
+    container_platform = _regenerate.detect_container_platform(record.tag)
+    fp = record.fingerprint_for(container_platform)
+    return fp.digest if fp else None
+
+
 def _mirror_drive_state(db: PipelineDB, run_id: str, rec: DriveRecord) -> None:
     db.upsert_drive_state(
         run_id=run_id,
@@ -193,7 +205,8 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
             timeout_s: int, host_label: str | None,
             max_sde_date: dt.date,
             db: PipelineDB | None = None,
-            run_id: str | None = None) -> DriveRecord:
+            run_id: str | None = None,
+            db_lock: threading.Lock | None = None) -> DriveRecord:
     key = _key(candidate)
     now = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     rec = DriveRecord(candidate_key=key, status="", timestamp=now,
@@ -320,50 +333,56 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
     # ---- DB mirror (optional) ----
     # Entry is on disk → index it. Record the reproduction attempt under
     # this run. Seed the classification row if we classified. Keep this
-    # additive; JSONL stays primary.
+    # additive; JSONL stays primary. Under --parallel > 1 these calls race;
+    # gate the compound write with db_lock.
     if db is not None:
-        entry_id = db.upsert_entry_from_json(Path(out))
-        db.patch_entry_metadata(
-            entry_id,
-            post_commit_date=rec.commit_date,
-            rust_msrv=rec.rust_msrv,
-            msrv_detected=msrv_detected,
-        )
-        db.upsert_ingestion_source(
-            entry_id=entry_id,
-            source=candidate.get("source") or "unknown",
-            source_ref=key,
-            ingested_by="cargo_drive.py",
-        )
-        db.record_attempt(
-            entry_id=entry_id,
-            run_id=run_id,
-            host_id=host_label or socket.gethostname(),
-            host_os=host_platform.system().lower(),
-            host_arch=_docker_platform(),
-            started_at=now,
-            finished_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-            fat_image_tag_used=resolve_match.tag,
-            fingerprint_expected=resolve_match.environmentFingerprint,
-            fingerprint_actual=resolve_match.environmentFingerprint,
-            fingerprint_matched=True,
-            pre_exit_code=repro.pre_exit_code,
-            post_exit_code=repro.post_exit_code,
-            fix_exit_code=repro.fix_exit_code,
-            outcome_matched=repro.matches_category(discovered_category),
-            pre_log_path=repro.pre_log_path,
-            post_log_path=repro.post_log_path,
-            fix_log_path=repro.fix_log_path,
-        )
-        if classification_dict is not None:
-            db.seed_classification_if_absent(
-                entry_id=entry_id,
-                classifier_version=CLASSIFIER_VERSION,
-                classifier_git_sha="",
-                top_category=classification_dict.get("topCategory") or "OTHER",
-                sub_category=classification_dict.get("subCategory"),
-                error_codes=classification_dict.get("errorCodes") or [],
+        # Gate the whole compound write under --parallel > 1 so threads
+        # don't interleave mid-transaction. Cheap for N=1 (uncontended lock).
+        with (db_lock if db_lock is not None else nullcontext()):
+            entry_id = db.upsert_entry_from_json(Path(out))
+            db.patch_entry_metadata(
+                entry_id,
+                post_commit_date=rec.commit_date,
+                rust_msrv=rec.rust_msrv,
+                msrv_detected=msrv_detected,
             )
+            db.upsert_ingestion_source(
+                entry_id=entry_id,
+                source=candidate.get("source") or "unknown",
+                source_ref=key,
+                ingested_by="cargo_drive.py",
+            )
+            db.record_attempt(
+                entry_id=entry_id,
+                run_id=run_id,
+                host_id=host_label or socket.gethostname(),
+                host_os=host_platform.system().lower(),
+                host_arch=_docker_platform(),
+                started_at=now,
+                finished_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                fat_image_tag_used=resolve_match.tag,
+                # v0.0.5: fat-image records carry per-platform fingerprints; pick
+                # the one for this host's container platform. None if not recorded.
+                fingerprint_expected=_ledger_digest_for_this_host(resolve_match),
+                fingerprint_actual=_ledger_digest_for_this_host(resolve_match),
+                fingerprint_matched=True,
+                pre_exit_code=repro.pre_exit_code,
+                post_exit_code=repro.post_exit_code,
+                fix_exit_code=repro.fix_exit_code,
+                outcome_matched=repro.matches_category(discovered_category),
+                pre_log_path=repro.pre_log_path,
+                post_log_path=repro.post_log_path,
+                fix_log_path=repro.fix_log_path,
+            )
+            if classification_dict is not None:
+                db.seed_classification_if_absent(
+                    entry_id=entry_id,
+                    classifier_version=CLASSIFIER_VERSION,
+                    classifier_git_sha="",
+                    top_category=classification_dict.get("topCategory") or "OTHER",
+                    sub_category=classification_dict.get("subCategory"),
+                    error_codes=classification_dict.get("errorCodes") or [],
+                )
 
     # --- 1g: regenerate-verify ---
     if regenerate_verify:
@@ -398,7 +417,13 @@ def main() -> int:
                    help="After assembling, run cargo_regenerate.py on the entry as a sanity check.")
     p.add_argument("--limit", type=int, default=None, help="Stop after N candidates.")
     p.add_argument("--parallel", type=int, default=1,
-                   help="Accepted for forward-compat; >1 logs a warning and serialises.")
+                   help="Number of worker threads. Each worker runs an "
+                        "independent candidate; the Docker daemon handles "
+                        "concurrent containers. N>1 requires all fat images "
+                        "pre-built (incompatible with --build-missing-bases). "
+                        "Good starting points: 4 on a 16-core box, 8 on a "
+                        "32-core box. RAM bound: each cargo test run can use "
+                        "~4-8 GB.")
     p.add_argument("--timeout", type=int, default=1800, help="Per-stage timeout (s).")
     p.add_argument("--host", default=None, help="Host label recorded in regenerate-verify records.")
     p.add_argument("--max-sde-date", type=lambda s: dt.date.fromisoformat(s),
@@ -420,8 +445,12 @@ def main() -> int:
     max_sde_date = args.max_sde_date or _fat.default_max_sde_date()
     print(f"max_sde_date (run parameter): {max_sde_date}", file=sys.stderr)
 
-    if args.parallel > 1:
-        print(f"WARN: --parallel={args.parallel} not supported yet, running serially.", file=sys.stderr)
+    if args.parallel > 1 and args.build_missing_bases:
+        print("ERROR: --parallel > 1 is incompatible with --build-missing-bases "
+              "(fat-image register() writes the shared index and would race). "
+              "Pre-build all fat images first via `cargo_plan_fat_images | bash`, "
+              "then re-run without --build-missing-bases.", file=sys.stderr)
+        return 2
 
     out_dir = Path(args.out_dir)
     logs_dir = Path(args.logs_dir)
@@ -451,41 +480,75 @@ def main() -> int:
         )
         print(f"db: {args.db}  run_id={run_id}", file=sys.stderr)
 
-    try:
-        with Path(args.candidates).open() as f:
-            n = 0
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                candidate = json.loads(line)
-                key = _key(candidate)
+    # Read candidates first; skip-list filter; then dispatch.
+    todo: list[dict] = []
+    with Path(args.candidates).open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            candidate = json.loads(line)
+            if _key(candidate) in existing and existing[_key(candidate)].status in terminal:
+                counts["skipped"] += 1
+                continue
+            todo.append(candidate)
+            if args.limit and len(todo) >= args.limit:
+                break
 
-                if key in existing and existing[key].status in terminal:
-                    counts["skipped"] += 1
-                    continue
+    n_workers = max(1, args.parallel)
+    state_lock = threading.Lock()
+    db_lock = threading.Lock() if (db is not None and n_workers > 1) else None
 
-                rec = process(
-                    candidate,
-                    out_dir=out_dir, logs_dir=logs_dir,
-                    build_missing_bases=args.build_missing_bases,
-                    regenerate_verify=args.regenerate_verify,
-                    timeout_s=args.timeout,
-                    host_label=args.host,
-                    max_sde_date=max_sde_date,
-                    db=db,
-                    run_id=run_id,
-                )
-                append_state(state_path, rec)
-                if db is not None and run_id is not None:
+    def _worker(candidate: dict) -> DriveRecord:
+        rec = process(
+            candidate,
+            out_dir=out_dir, logs_dir=logs_dir,
+            build_missing_bases=args.build_missing_bases,
+            regenerate_verify=args.regenerate_verify,
+            timeout_s=args.timeout,
+            host_label=args.host,
+            max_sde_date=max_sde_date,
+            db=db,
+            run_id=run_id,
+            db_lock=db_lock,
+        )
+        with state_lock:
+            append_state(state_path, rec)
+            if db is not None and run_id is not None:
+                with (db_lock if db_lock is not None else nullcontext()):
                     _mirror_drive_state(db, run_id, rec)
+        return rec
+
+    print(f"workers: {n_workers}", file=sys.stderr)
+
+    try:
+        if n_workers == 1:
+            # Serial path — unchanged semantics for resume ergonomics,
+            # log readability, and "no threads at all" debugging.
+            for candidate in todo:
+                rec = _worker(candidate)
                 counts["processed"] += 1
                 status_counts[rec.status] = status_counts.get(rec.status, 0) + 1
-                print(f"[{key}] → {rec.status}" + (f"  ({rec.reason})" if rec.reason else ""), file=sys.stderr)
-
-                n += 1
-                if args.limit and n >= args.limit:
-                    break
+                print(f"[{rec.candidate_key}] → {rec.status}"
+                      + (f"  ({rec.reason})" if rec.reason else ""),
+                      file=sys.stderr)
+        else:
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                futures = [pool.submit(_worker, c) for c in todo]
+                for fut in as_completed(futures):
+                    try:
+                        rec = fut.result()
+                    except Exception as e:
+                        # A worker crashed. Log and move on — JSONL already
+                        # missing the record, so the candidate will be
+                        # re-tried on the next run. Don't kill the pool.
+                        print(f"WORKER ERROR: {e!r}", file=sys.stderr)
+                        continue
+                    counts["processed"] += 1
+                    status_counts[rec.status] = status_counts.get(rec.status, 0) + 1
+                    print(f"[{rec.candidate_key}] → {rec.status}"
+                          + (f"  ({rec.reason})" if rec.reason else ""),
+                          file=sys.stderr)
     finally:
         if db is not None and run_id is not None:
             db.finish_run(run_id)

@@ -164,9 +164,12 @@ even if tests fail or the process is interrupted.
 1. Reads `reproduction.fatImage` from the entry. Constructs the
    canonical tag. If not locally present, requires
    `--build-missing-bases` to build it.
-2. Extracts `/manifest/*`, computes the environment fingerprint,
-   asserts equality with `reproduction.environmentFingerprint.digest`.
-   **Mismatch is a hard fail.**
+2. Extracts `/manifest/*`, computes the environment fingerprint, looks
+   up the expected digest in `reproduction.environmentFingerprints` by
+   this host's container platform (e.g. `linux/arm64`). Mismatch for a
+   recorded platform is a **hard fail**. A container platform not yet
+   in the list triggers **append mode** — the new fingerprint is added
+   to the entry so the next run on that arch becomes strict.
 3. Builds `<hash>-pre`, `<hash>-post`, and optionally `<hash>-fix` thin
    images, each with `cargo vendor` pre-populated and
    `RUSTFLAGS=--remap-path-prefix=/src=.` set.

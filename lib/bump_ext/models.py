@@ -129,6 +129,10 @@ class FingerprintFile(BaseModel):
 
 class EnvironmentFingerprint(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    platform: str = Field(
+        pattern=r"^linux/(amd64|arm64|386|arm/v6|arm/v7|ppc64le|s390x|riscv64)$",
+        description="Container platform, e.g. linux/arm64.",
+    )
     digest: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
     files: list[FingerprintFile] = Field(min_length=1)
     rustcVersion: str | None = None
@@ -156,7 +160,7 @@ class Reproduction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fatImage: FatImage
     buildFlags: list[str] = Field(min_length=1)
-    environmentFingerprint: EnvironmentFingerprint
+    environmentFingerprints: list[EnvironmentFingerprint] = Field(min_length=1)
     thinImages: ThinImages | None = None
     verifiedOn: list[VerifiedOn] = Field(default_factory=list)
 

@@ -1,6 +1,6 @@
 {
   "id": "cargo-0abf7148",
-  "schemaVersion": "0.0.4",
+  "schemaVersion": "0.0.5",
   "ecosystem": "cargo",
   "category": "breaking",
   "project": {
@@ -42,23 +42,6 @@
       "--locked",
       "--offline"
     ],
-    "environmentFingerprint": {
-      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-      "files": [
-        {
-          "path": "/manifest/packages.txt",
-          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-          "bytes": 20000
-        },
-        {
-          "path": "/manifest/rustc.txt",
-          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
-          "bytes": 200
-        }
-      ],
-      "rustcVersion": "rustc 1.75.0 (82e1608df 2023-12-21)",
-      "packageCount": 700
-    },
     "thinImages": {
       "expectedPre": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
       "expectedPost": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
@@ -71,6 +54,26 @@
         "fingerprintMatch": true,
         "fatImageDigestMatch": true,
         "outcomeMatch": true
+      }
+    ],
+    "environmentFingerprints": [
+      {
+        "platform": "linux/arm64",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "files": [
+          {
+            "path": "/manifest/packages.txt",
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "bytes": 20000
+          },
+          {
+            "path": "/manifest/rustc.txt",
+            "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+            "bytes": 200
+          }
+        ],
+        "rustcVersion": "rustc 1.75.0 (82e1608df 2023-12-21)",
+        "packageCount": 700
       }
     ]
   },

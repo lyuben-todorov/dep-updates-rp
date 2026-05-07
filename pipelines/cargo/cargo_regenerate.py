@@ -255,7 +255,12 @@ def append_verified_on(entry: dict, record: dict) -> None:
 
 
 def detect_platform() -> str:
-    """Docker-style platform string for this host."""
+    """Docker-style platform string for the *host*, e.g. 'darwin/arm64'.
+
+    This is recorded in reproduction.verifiedOn[].platform for human
+    auditability. Fingerprints are keyed by container platform, not host —
+    use `detect_container_platform(tag)` for that.
+    """
     mach = host_platform.machine().lower()
     arch = {
         "x86_64": "amd64", "amd64": "amd64",
@@ -263,6 +268,27 @@ def detect_platform() -> str:
     }.get(mach, mach)
     sys_name = host_platform.system().lower()
     return f"{sys_name}/{arch}"
+
+
+def detect_container_platform(tag: str) -> str:
+    """Container-side platform of the fat image, e.g. 'linux/arm64'.
+
+    This is the key we use for environmentFingerprints lookup — identical
+    on a Linux host and a Mac (Docker Desktop runs a Linux VM, so the
+    container still reports linux/<arch>). Falls back to 'linux/<host-arch>'
+    if docker inspect doesn't return a result.
+    """
+    r = subprocess.run(
+        ["docker", "image", "inspect", "--format",
+         "{{.Os}}/{{.Architecture}}{{if .Variant}}/{{.Variant}}{{end}}", tag],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip()
+    # Fallback: infer from host arch. Docker's container is always linux.
+    mach = host_platform.machine().lower()
+    arch = {"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(mach, mach)
+    return f"linux/{arch}"
 
 
 # ---- main flow ---------------------------------------------------------------
@@ -323,22 +349,55 @@ def regenerate(entry_path: Path, *, build_missing_bases: bool, skip_tests: bool,
         print(f"  fat digest: {actual_fat_digest}  vs expected {expected_fat_digest}  [{tag_str}]", file=sys.stderr)
 
     # --- 2. Fingerprint ---
+    container_platform = detect_container_platform(tag)
+
     with tempfile.TemporaryDirectory() as td:
         manifest_dir = Path(td)
         extract_manifest(tag, manifest_dir)
         actual_digest, actual_files = compute_fingerprint(manifest_dir)
+        actual_rustc = (manifest_dir / "rustc.txt").read_text().splitlines()[0]
+        actual_pkg_count = len((manifest_dir / "packages.txt").read_text().splitlines())
 
-    expected_fp = repro["environmentFingerprint"]
-    fp_match = (actual_digest == expected_fp["digest"])
-    print(f"  fingerprint: {actual_digest}", file=sys.stderr)
-    print(f"  expected:    {expected_fp['digest']}  [{'match' if fp_match else 'MISMATCH'}]", file=sys.stderr)
+    # v0.0.5: list of per-platform fingerprints. Find the one for this arch.
+    fingerprints = repro.get("environmentFingerprints") or []
+    by_platform = {fp["platform"]: fp for fp in fingerprints}
+    expected_fp = by_platform.get(container_platform)
 
-    if not fp_match:
-        print("  per-file diff:", file=sys.stderr)
-        for line in diff_fingerprint(expected_fp, actual_files):
-            print(line, file=sys.stderr)
-        print("  environment fingerprint mismatch — refusing to proceed.", file=sys.stderr)
-        return EXIT_FINGERPRINT_MISMATCH
+    print(f"  container platform: {container_platform}", file=sys.stderr)
+    print(f"  fingerprint:        {actual_digest}", file=sys.stderr)
+
+    # `fp_match` means: we had an expected fingerprint for this platform and
+    # it matched. `None` means we had no expected for this platform — first
+    # verification on this arch, append mode.
+    new_arch = expected_fp is None
+    if new_arch:
+        print(f"  no recorded fingerprint for {container_platform} yet — "
+              f"appending as new platform", file=sys.stderr)
+        fp_match = True
+        # Append the new platform's fingerprint into the entry's list.
+        fingerprints.append({
+            "platform": container_platform,
+            "digest": actual_digest,
+            "files": [
+                {"path": f["path"], "sha256": f["sha256"], "bytes": f["bytes"]}
+                for f in actual_files
+            ],
+            "rustcVersion": actual_rustc,
+            "packageCount": actual_pkg_count,
+        })
+        repro["environmentFingerprints"] = fingerprints
+    else:
+        fp_match = (actual_digest == expected_fp["digest"])
+        print(f"  expected:           {expected_fp['digest']}  "
+              f"[{'match' if fp_match else 'MISMATCH'}]", file=sys.stderr)
+
+        if not fp_match:
+            print("  per-file diff:", file=sys.stderr)
+            for line in diff_fingerprint(expected_fp, actual_files):
+                print(line, file=sys.stderr)
+            print("  environment fingerprint mismatch for "
+                  f"{container_platform} — refusing to proceed.", file=sys.stderr)
+            return EXIT_FINGERPRINT_MISMATCH
 
     # --- 3 & 4. Thin images + tests ---
     repo_url = entry["project"]["url"]

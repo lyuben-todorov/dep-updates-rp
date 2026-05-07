@@ -86,8 +86,6 @@ CREATE TABLE IF NOT EXISTS fat_images (
   debian_release          TEXT NOT NULL,
   source_date_epoch       INTEGER NOT NULL,
   apt_snapshot            TEXT NOT NULL,
-  environment_fingerprint TEXT NOT NULL,
-  package_count           INTEGER,
   dockerfile_hash         TEXT,
   repro_script_hash       TEXT,
   first_seen_at           DATE,
@@ -101,6 +99,20 @@ CREATE INDEX IF NOT EXISTS idx_fat_rust    ON fat_images(rust_version);
 CREATE INDEX IF NOT EXISTS idx_fat_debian  ON fat_images(debian_release);
 CREATE INDEX IF NOT EXISTS idx_fat_sde     ON fat_images(source_date_epoch);
 CREATE INDEX IF NOT EXISTS idx_fat_status  ON fat_images(status);
+
+-- Per-container-platform fingerprints for each fat image. One row per
+-- (tag, platform). Matches v0.0.5 entry JSON reproduction.environmentFingerprints.
+CREATE TABLE IF NOT EXISTS fat_image_fingerprints (
+  tag                     TEXT NOT NULL,
+  platform                TEXT NOT NULL,
+  digest                  TEXT NOT NULL,
+  package_count           INTEGER,
+  PRIMARY KEY (tag, platform),
+  FOREIGN KEY (tag) REFERENCES fat_images(tag) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_fat_fp_platform ON fat_image_fingerprints(platform);
+CREATE INDEX IF NOT EXISTS idx_fat_fp_digest   ON fat_image_fingerprints(digest);
 
 CREATE TABLE IF NOT EXISTS reproduction_attempts (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,6 +231,10 @@ class PipelineDB:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute("PRAGMA synchronous = NORMAL")
+        # Multi-driver / multi-threaded writers need this: SQLITE_BUSY retries
+        # for up to 10s before the client sees an error. Single-writer runs
+        # never trip it; parallel runs need it to not error instantly.
+        self.conn.execute("PRAGMA busy_timeout = 10000")
         self._init_schema()
 
     def __enter__(self) -> "PipelineDB":
@@ -305,7 +321,13 @@ class PipelineDB:
         file_hash = _sha256_file(entry_path)
         repro = entry.get("reproduction") or {}
         fat = repro.get("fatImage") or {}
-        fp = repro.get("environmentFingerprint") or {}
+
+        # v0.0.5: environmentFingerprints is a list of per-platform entries.
+        # For the denormalised entries.fingerprint_digest column we pick the
+        # first fingerprint (for display/query). Per-platform matching lives
+        # in reproduction_attempts.
+        fps = repro.get("environmentFingerprints") or []
+        fp = fps[0] if fps else {}
 
         fat_tag: str | None = None
         if fat:
@@ -466,8 +488,6 @@ class PipelineDB:
         debian_release: str,
         source_date_epoch: int,
         apt_snapshot: str,
-        environment_fingerprint: str,
-        package_count: int | None = None,
         dockerfile_hash: str | None = None,
         repro_script_hash: str | None = None,
         first_seen_at: str | None = None,
@@ -479,17 +499,15 @@ class PipelineDB:
         self.conn.execute(
             """INSERT INTO fat_images
                  (tag, rust_version, debian_release, source_date_epoch,
-                  apt_snapshot, environment_fingerprint, package_count,
+                  apt_snapshot,
                   dockerfile_hash, repro_script_hash, first_seen_at,
                   built_on_host, local_image_id, status, notes)
-               VALUES (?, ?, ?, ?,   ?, ?, ?,   ?, ?, ?,   ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?,   ?,   ?, ?, ?,   ?, ?, ?, ?)
                ON CONFLICT(tag) DO UPDATE SET
                  rust_version=excluded.rust_version,
                  debian_release=excluded.debian_release,
                  source_date_epoch=excluded.source_date_epoch,
                  apt_snapshot=excluded.apt_snapshot,
-                 environment_fingerprint=excluded.environment_fingerprint,
-                 package_count=COALESCE(excluded.package_count, fat_images.package_count),
                  dockerfile_hash=COALESCE(excluded.dockerfile_hash, fat_images.dockerfile_hash),
                  repro_script_hash=COALESCE(excluded.repro_script_hash, fat_images.repro_script_hash),
                  first_seen_at=COALESCE(fat_images.first_seen_at, excluded.first_seen_at),
@@ -504,8 +522,6 @@ class PipelineDB:
                 debian_release,
                 source_date_epoch,
                 apt_snapshot,
-                environment_fingerprint,
-                package_count,
                 dockerfile_hash,
                 repro_script_hash,
                 first_seen_at,
@@ -514,6 +530,27 @@ class PipelineDB:
                 status,
                 notes,
             ),
+        )
+
+    def upsert_fat_image_fingerprint(
+        self,
+        *,
+        tag: str,
+        platform: str,
+        digest: str,
+        package_count: int | None = None,
+    ) -> None:
+        """Upsert per-platform fingerprint row. `fat_images(tag)` must exist."""
+        self.conn.execute(
+            """INSERT INTO fat_image_fingerprints
+                 (tag, platform, digest, package_count)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(tag, platform) DO UPDATE SET
+                 digest=excluded.digest,
+                 package_count=COALESCE(excluded.package_count,
+                                         fat_image_fingerprints.package_count)
+            """,
+            (tag, platform, digest, package_count),
         )
 
     def set_fat_image_status(self, tag: str, status: str) -> None:

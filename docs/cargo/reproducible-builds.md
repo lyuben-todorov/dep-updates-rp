@@ -13,7 +13,7 @@ images are on disk, how to run a batch) lives in
 | What's the reproducibility claim? | **Environmental equivalence.** Two hosts "agree on the same environment" iff their fat image emits the same sha256 over `/manifest/{packages,rustc,cargo,os-release,sources.list}`. |
 | Why not byte-identical OCI digests? | Apt-internal non-determinism (pkgcache.bin ordering, log timestamps, etc.) jitters OCI layers by ~tens of bytes per `RUN` *even with pinned `SOURCE_DATE_EPOCH` + pinned apt snapshot*. Documented below. |
 | Is this RB.org canon? | No. RB.org defines reproducibility as bit-for-bit. We consciously relax to environment equivalence because it's what the supervisor actually asked for ("ship a regeneration script") and what survives contact with apt. |
-| What's the contract? | Entry JSON records `fatImage.{rustVersion, sourceDateEpoch, aptSnapshot, debianRelease}` + `environmentFingerprint.{digest, files[]}`. Regenerator rebuilds, recomputes fingerprint, asserts equality. Mismatch is a hard fail. |
+| What's the contract? | Entry JSON records `fatImage.{rustVersion, sourceDateEpoch, aptSnapshot, debianRelease}` + `environmentFingerprints[]` — one entry per container platform (`linux/arm64`, `linux/amd64`, ...), each with `{platform, digest, files[]}`. Regenerator rebuilds, recomputes fingerprint, looks up the expected digest by this host's container platform, asserts equality. Mismatch for a recorded platform is a hard fail; a container platform not yet in the list is appended on first run (schema v0.0.5). |
 | Is the OCI digest recorded at all? | Yes, as `fatImage.expectedDigest`. Advisory only — mismatch logged as a warning for cross-host drift analysis, not a fail. |
 
 ## The pivot (2026-05-03)

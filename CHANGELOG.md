@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.0.5 — 2026-05-07
+
+Per-architecture environment fingerprints. Entries now accumulate
+fingerprints across container platforms (`linux/arm64`, `linux/amd64`,
+...) instead of pinning to one. The reproducibility contract is still
+byte-exact for a given `(entry, platform)`; cross-arch runs no longer
+false-fail.
+
+**Schema (breaking).**
+- `reproduction.environmentFingerprint` (object) →
+  `reproduction.environmentFingerprints` (list). Each item now carries
+  a required `platform` field (`linux/<arch>`) alongside `digest`,
+  `files[]`, `rustcVersion`, `packageCount`. At least one entry required.
+- Backfill: run `scripts/migrate_v0_0_5.py` once to wrap existing scalar
+  fingerprints into single-item lists tagged `linux/arm64` (the arch on
+  which the two seed entries were produced).
+
+**Fat-image ledger (`docker/cargo-fat/index.json`).**
+- `environmentFingerprint: "sha256:..."` + `packageCount: N` at the
+  record level → `environmentFingerprints: [{platform, digest,
+  packageCount}, ...]`. Schema version of the ledger bumped 0.1.0 → 0.2.0.
+
+**Code.**
+- `cargo_regenerate.py` — looks up the expected fingerprint by container
+  platform. Mismatch for a recorded platform is still a hard fail.
+  Unrecorded platforms are appended to the entry's list (first-verification
+  mode for new arches).
+- `cargo_assemble_entry.py` — stamps a single-entry list tagged by the
+  fat image's container platform (detected via `docker image inspect`).
+- `pipelines/cargo/fat_image.py` — `FatImageFingerprint` dataclass,
+  `FatImageRecord.environmentFingerprints: tuple[...]`, new
+  `register_fingerprint(tag, fp)` helper. `fat_image list` prints
+  platforms per tag.
+- `bump_ext.db.PipelineDB` — DDL drops
+  `fat_images.environment_fingerprint` + `fat_images.package_count`,
+  adds child table `fat_image_fingerprints(tag, platform, digest,
+  package_count)` with FK to `fat_images(tag)`. `upsert_fat_image`
+  narrowed accordingly; new `upsert_fat_image_fingerprint`.
+- `scripts/rebuild_index.py` — populates both the parent and the
+  fingerprint child rows.
+- `scripts/migrate_v0_0_5.py` — one-shot v0.0.4 → v0.0.5 migration for
+  entries + ledger. Idempotent.
+
+**Not changed.** Fat image build process, thin-image lifecycle,
+classifier, candidate ingestion, drive-state schema.
+
 ## v0.0.4 — 2026-05-04 (+ 2026-05-06 addendum)
 
 Category-neutral nomenclature + fat-image internals refactor. The

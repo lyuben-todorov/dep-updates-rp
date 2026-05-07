@@ -146,13 +146,16 @@ entry = Entry(
             debianRelease="buster",
         ),
         buildFlags=["--locked", "--offline"],
-        environmentFingerprint=EnvironmentFingerprint(
-            digest="sha256:…",
-            files=[
-                FingerprintFile(path="/manifest/packages.txt", sha256="…", bytes=22866),
-                # ... etc
-            ],
-        ),
+        environmentFingerprints=[
+            EnvironmentFingerprint(
+                platform="linux/arm64",
+                digest="sha256:…",
+                files=[
+                    FingerprintFile(path="/manifest/packages.txt", sha256="…", bytes=22866),
+                    # ... etc
+                ],
+            ),
+        ],
         thinImages=None,
         verifiedOn=[],
     ),

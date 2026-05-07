@@ -30,13 +30,14 @@ sys.path.insert(0, str(ROOT / "lib"))
 from bump_ext import PipelineDB, SchemaError, validate_entry  # noqa: E402
 
 
-def _rebuild_fat_images(db: PipelineDB, index_path: Path) -> int:
+def _rebuild_fat_images(db: PipelineDB, index_path: Path) -> tuple[int, int]:
+    """Returns (n_images, n_fingerprint_rows)."""
     if not index_path.exists():
         print(f"warn: fat-image index not found at {index_path}", file=sys.stderr)
-        return 0
+        return 0, 0
     with index_path.open() as f:
         idx = json.load(f)
-    n = 0
+    n_images = n_fps = 0
     for rec in idx.get("fatImages", []):
         db.upsert_fat_image(
             tag=rec["tag"],
@@ -44,14 +45,20 @@ def _rebuild_fat_images(db: PipelineDB, index_path: Path) -> int:
             debian_release=rec["debianRelease"],
             source_date_epoch=int(rec["sourceDateEpoch"]),
             apt_snapshot=rec["aptSnapshot"],
-            environment_fingerprint=rec["environmentFingerprint"],
-            package_count=rec.get("packageCount"),
             first_seen_at=rec.get("firstSeenAt"),
             notes=rec.get("notes"),
             status="valid",
         )
-        n += 1
-    return n
+        n_images += 1
+        for fp in rec.get("environmentFingerprints", []):
+            db.upsert_fat_image_fingerprint(
+                tag=rec["tag"],
+                platform=fp["platform"],
+                digest=fp["digest"],
+                package_count=fp.get("packageCount"),
+            )
+            n_fps += 1
+    return n_images, n_fps
 
 
 def _rebuild_entries(db: PipelineDB, entries_dir: Path) -> tuple[int, int, int]:
@@ -120,11 +127,12 @@ def main() -> int:
     print(f"fat index: {fat_index}", file=sys.stderr)
 
     with PipelineDB(db_path) as db:
-        n_fat = _rebuild_fat_images(db, fat_index)
+        n_fat, n_fat_fps = _rebuild_fat_images(db, fat_index)
         n_e, n_i, n_c = _rebuild_entries(db, entries_dir)
 
     print("", file=sys.stderr)
     print(f"fat_images:        {n_fat}", file=sys.stderr)
+    print(f"fat fingerprints:  {n_fat_fps}", file=sys.stderr)
     print(f"entries:           {n_e}", file=sys.stderr)
     print(f"ingestion (new):   {n_i}", file=sys.stderr)
     print(f"classifications:   {n_c}", file=sys.stderr)
