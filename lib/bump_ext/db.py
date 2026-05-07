@@ -226,7 +226,13 @@ class PipelineDB:
         # No PARSE_DECLTYPES — we store ISO-8601 strings and want strings back.
         # sqlite3's built-in TIMESTAMP converter assumes a space separator and
         # crashes on ISO's `T`.
-        self.conn = sqlite3.connect(str(self.path), isolation_level=None)
+        # check_same_thread=False: the ThreadPoolExecutor main loop in
+        # cargo_drive shares one Connection across workers. Thread safety is
+        # ensured by the caller via a `db_lock` around compound writes; the
+        # sqlite3 module's default thread-local check is redundant for us.
+        self.conn = sqlite3.connect(
+            str(self.path), isolation_level=None, check_same_thread=False
+        )
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute("PRAGMA foreign_keys = ON")
