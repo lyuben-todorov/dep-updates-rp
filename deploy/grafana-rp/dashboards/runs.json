@@ -1,0 +1,41 @@
+{
+  "title": "Runs",
+  "uid": "runs",
+  "tags": ["rp2026", "pipeline"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": {"from": "now-30d", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "All runs (most recent first)",
+      "type": "table",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT r.run_id, r.host, r.started_at, r.finished_at, CASE WHEN r.finished_at IS NULL THEN 'running' ELSE CAST((julianday(r.finished_at) - julianday(r.started_at)) * 86400 AS INTEGER) || 's' END AS duration, r.max_sde_date, r.candidates_source, (SELECT COUNT(*) FROM drive_state WHERE run_id = r.run_id) AS processed, (SELECT COUNT(*) FROM drive_state WHERE run_id = r.run_id AND status = 'ok') AS ok, (SELECT COUNT(*) FROM drive_state WHERE run_id = r.run_id AND status != 'ok') AS failed, (SELECT COUNT(*) FROM reproduction_attempts WHERE run_id = r.run_id) AS attempts FROM runs r ORDER BY r.started_at DESC",
+        "queryText": "SELECT r.run_id, r.host, r.started_at, r.finished_at, CASE WHEN r.finished_at IS NULL THEN 'running' ELSE CAST((julianday(r.finished_at) - julianday(r.started_at)) * 86400 AS INTEGER) || 's' END AS duration, r.max_sde_date, r.candidates_source, (SELECT COUNT(*) FROM drive_state WHERE run_id = r.run_id) AS processed, (SELECT COUNT(*) FROM drive_state WHERE run_id = r.run_id AND status = 'ok') AS ok, (SELECT COUNT(*) FROM drive_state WHERE run_id = r.run_id AND status != 'ok') AS failed, (SELECT COUNT(*) FROM reproduction_attempts WHERE run_id = r.run_id) AS attempts FROM runs r ORDER BY r.started_at DESC",
+        "timeColumns": []
+      }],
+      "options": {"showHeader": true}
+    },
+    {
+      "id": 2,
+      "title": "Status distribution per run",
+      "type": "barchart",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 14},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT run_id, status, COUNT(*) AS count FROM drive_state GROUP BY run_id, status ORDER BY run_id DESC, count DESC",
+        "queryText": "SELECT run_id, status, COUNT(*) AS count FROM drive_state GROUP BY run_id, status ORDER BY run_id DESC, count DESC",
+        "timeColumns": []
+      }],
+      "options": {"orientation": "horizontal", "xTickLabelRotation": 0, "stacking": "normal"}
+    }
+  ]
+}

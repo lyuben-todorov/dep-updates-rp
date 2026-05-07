@@ -1,0 +1,30 @@
+[Unit]
+Description=Grafana instance for RP2026 (/rp/)
+Documentation=https://grafana.com/docs/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+Restart=on-failure
+User=grafana
+Group=grafana
+WorkingDirectory=/usr/share/grafana
+
+ExecStart=/usr/share/grafana/bin/grafana server \
+  --config=/etc/grafana-rp/grafana.ini \
+  --pidfile=/run/grafana-rp/grafana-server.pid \
+  --packaging=deb \
+  cfg:default.paths.logs=/var/log/grafana-rp \
+  cfg:default.paths.data=/var/lib/grafana-rp \
+  cfg:default.paths.plugins=/var/lib/grafana-rp/plugins \
+  cfg:default.paths.provisioning=/etc/grafana-rp/provisioning
+
+RuntimeDirectory=grafana-rp
+RuntimeDirectoryMode=0750
+
+LimitNOFILE=10000
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

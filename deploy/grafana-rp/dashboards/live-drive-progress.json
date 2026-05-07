@@ -1,0 +1,144 @@
+{
+  "title": "Live Drive Progress",
+  "uid": "live-drive-progress",
+  "tags": ["rp2026", "pipeline"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "run_id",
+        "label": "Run",
+        "type": "query",
+        "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+        "query": "SELECT run_id FROM runs ORDER BY started_at DESC",
+        "includeAll": false,
+        "multi": false,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Candidates processed",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id'",
+        "queryText": "SELECT COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id'",
+        "timeColumns": []
+      }],
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2,
+      "title": "Succeeded (ok)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id' AND status = 'ok'",
+        "queryText": "SELECT COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id' AND status = 'ok'",
+        "timeColumns": []
+      }],
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green"}]}}, "overrides": []}
+    },
+    {
+      "id": 3,
+      "title": "Success rate",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT CAST(100.0 * SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) / COUNT(*) AS REAL) AS value FROM drive_state WHERE run_id = '$run_id'",
+        "queryText": "SELECT CAST(100.0 * SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) / COUNT(*) AS REAL) AS value FROM drive_state WHERE run_id = '$run_id'",
+        "timeColumns": []
+      }],
+      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 1}, "overrides": []}
+    },
+    {
+      "id": 4,
+      "title": "Reproduction attempts",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT COUNT(*) AS value FROM reproduction_attempts WHERE run_id = '$run_id'",
+        "queryText": "SELECT COUNT(*) AS value FROM reproduction_attempts WHERE run_id = '$run_id'",
+        "timeColumns": []
+      }]
+    },
+    {
+      "id": 5,
+      "title": "Status distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT status AS metric, COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY value DESC",
+        "queryText": "SELECT status AS metric, COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY value DESC",
+        "timeColumns": []
+      }],
+      "options": {"legend": {"displayMode": "table", "values": ["value", "percent"]}, "pieType": "donut"}
+    },
+    {
+      "id": 6,
+      "title": "Cumulative progress over time",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "time series",
+        "rawQueryText": "SELECT strftime('%s', updated_at) AS time, status, COUNT(*) OVER (PARTITION BY status ORDER BY updated_at) AS value FROM drive_state WHERE run_id = '$run_id' ORDER BY updated_at",
+        "queryText": "SELECT strftime('%s', updated_at) AS time, status, COUNT(*) OVER (PARTITION BY status ORDER BY updated_at) AS value FROM drive_state WHERE run_id = '$run_id' ORDER BY updated_at",
+        "timeColumns": ["time"]
+      }],
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "lineInterpolation": "stepAfter"}}, "overrides": []}
+    },
+    {
+      "id": 7,
+      "title": "Candidates per fat image",
+      "type": "bargauge",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT fat_image_tag AS metric, COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id' AND fat_image_tag IS NOT NULL GROUP BY fat_image_tag ORDER BY value DESC",
+        "queryText": "SELECT fat_image_tag AS metric, COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id' AND fat_image_tag IS NOT NULL GROUP BY fat_image_tag ORDER BY value DESC",
+        "timeColumns": []
+      }],
+      "options": {"orientation": "horizontal", "displayMode": "gradient"}
+    },
+    {
+      "id": 8,
+      "title": "Non-OK reasons (top)",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT substr(reason, 1, 80) AS reason, COUNT(*) AS count FROM drive_state WHERE run_id = '$run_id' AND status != 'ok' AND reason IS NOT NULL GROUP BY substr(reason, 1, 80) ORDER BY count DESC LIMIT 20",
+        "queryText": "SELECT substr(reason, 1, 80) AS reason, COUNT(*) AS count FROM drive_state WHERE run_id = '$run_id' AND status != 'ok' AND reason IS NOT NULL GROUP BY substr(reason, 1, 80) ORDER BY count DESC LIMIT 20",
+        "timeColumns": []
+      }]
+    }
+  ]
+}

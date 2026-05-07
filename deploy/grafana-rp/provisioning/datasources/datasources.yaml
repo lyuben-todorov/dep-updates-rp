@@ -1,0 +1,22 @@
+apiVersion: 1
+
+datasources:
+  # Read-only SQLite view of the pipeline index. Grafana queries pipeline.sqlite
+  # directly via the frser-sqlite-datasource plugin. The grafana-rp user must
+  # have read access to the file (set via chgrp in setup.sh).
+  - name: pipeline-sqlite
+    uid: pipeline-sqlite
+    type: frser-sqlite-datasource
+    access: proxy
+    isDefault: true
+    jsonData:
+      path: /home/ltodorov/rp2026/data/pipeline.sqlite
+    editable: true
+
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://localhost:9090
+    isDefault: false
+    editable: true
