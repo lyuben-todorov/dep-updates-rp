@@ -75,12 +75,16 @@ class Status:
     REGENERATE_MISMATCH = "regenerate_mismatch"
     METADATA_FETCH_FAILED = "metadata_fetch_failed"
     COMMIT_AFTER_MAX_SDE_DATE = "commit_after_max_sde_date"
+    # Existing entry's fatImage disagrees with the current bucketer's answer.
+    # We refuse to silently overwrite — operator passes --reassemble-stale to
+    # opt into the old-entry-discard-and-reassemble path.
+    ENTRY_BUCKET_STALE = "entry_bucket_stale"
 
     TERMINAL_SUCCESS = {OK}
     TERMINAL_FAILURE = {
         FAT_IMAGE_MISSING, FAT_IMAGE_BUILD_FAILED, NOT_REPRODUCIBLE,
         ASSEMBLE_FAILED, REGENERATE_MISMATCH, METADATA_FETCH_FAILED,
-        COMMIT_AFTER_MAX_SDE_DATE,
+        COMMIT_AFTER_MAX_SDE_DATE, ENTRY_BUCKET_STALE,
     }
 
 
@@ -219,6 +223,114 @@ def _preflight_fat_images(
     return needed, missing, build_cmds
 
 
+def _regenerate_or_flag_stale(
+    candidate: dict,
+    entry_path: Path,
+    rust_msrv: str,
+    commit_date: dt.date,
+    max_sde_date: dt.date,
+    reassemble_stale: bool,
+    rec: DriveRecord,
+    *,
+    logs_dir: Path,
+    host_label: str | None,
+    timeout_s: int,
+) -> str:
+    """Compare the existing entry's fatImage to what the current bucketer
+    produces. If they match, hand off to cargo_regenerate and return
+    "handled" (caller returns rec). If they differ and reassemble_stale
+    is False, park the candidate as entry_bucket_stale and return
+    "handled". If they differ and reassemble_stale is True, return
+    "fall_through" — caller re-runs the full assembly pipeline.
+    """
+    try:
+        with entry_path.open() as f:
+            entry = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        rec.status = Status.ENTRY_BUCKET_STALE
+        rec.reason = f"could not read existing entry: {e}"
+        return "handled"
+
+    entry_fat = (entry.get("reproduction") or {}).get("fatImage") or {}
+    entry_tag = (f"rp2026/cargo-fat:{entry_fat.get('rustVersion')}-"
+                 f"{entry_fat.get('debianRelease')}-"
+                 f"{_sde_to_yyyymmdd(entry_fat.get('sourceDateEpoch'))}")
+    rec.entry_path = str(entry_path)
+
+    debian = _toolchain.debian_release_for(commit_date)
+    bucket = _fat.bucket_for(rust_msrv, commit_date, debian)
+    if bucket is None:
+        # Can't bucket this candidate today (e.g. milestone/debian combo no
+        # longer supported). Treat as stale — don't touch the entry.
+        rec.status = Status.ENTRY_BUCKET_STALE
+        rec.reason = (f"current bucketer refuses this candidate "
+                      f"(msrv={rust_msrv}, debian={debian}); entry recorded {entry_tag}")
+        return "handled"
+    sde_info = _fat.canonical_sde_for(bucket, max_sde_date=max_sde_date)
+    current_tag = _fat.tag_for(bucket, sde_info.sde)
+
+    if current_tag != entry_tag:
+        if not reassemble_stale:
+            rec.fat_image_tag = entry_tag
+            rec.status = Status.ENTRY_BUCKET_STALE
+            rec.reason = (f"entry fatImage={entry_tag} but current bucketer "
+                          f"says {current_tag}; pass --reassemble-stale to "
+                          f"discard the entry and re-reproduce.")
+            return "handled"
+        return "fall_through"
+
+    # Bucket matches — existing entry is current-bucketer-canonical. Hand
+    # off to regenerate, which knows how to: verify the fat-image
+    # fingerprint, build thin images, rerun tests, append a verifiedOn
+    # record, and append a new-arch fingerprint if needed.
+    rec.fat_image_tag = entry_tag
+    key = _key(candidate)
+    print(f"[{key}] existing entry at {entry_path} — regenerate-only path", file=sys.stderr)
+    builder = "desktop-linux"
+    # pick a builder that exists on this host
+    for candidate_builder in ("rp2026", "default", "desktop-linux"):
+        probe = subprocess.run(
+            ["docker", "buildx", "inspect", candidate_builder],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if probe.returncode == 0:
+            builder = candidate_builder
+            break
+
+    rc = _regenerate.regenerate(
+        entry_path,
+        build_missing_bases=False,
+        skip_tests=False,
+        host_label=host_label or socket.gethostname(),
+        timeout_s=timeout_s,
+        builder=builder,
+    )
+    if rc == _regenerate.EXIT_OK:
+        rec.status = Status.OK
+    elif rc == _regenerate.EXIT_FINGERPRINT_MISMATCH:
+        rec.status = Status.REGENERATE_MISMATCH
+        rec.reason = "regenerate: environment fingerprint mismatch"
+    elif rc == _regenerate.EXIT_THIN_BUILD_FAILED:
+        rec.status = Status.NOT_REPRODUCIBLE
+        rec.reason = "regenerate: thin-image build failed"
+    elif rc == _regenerate.EXIT_FAT_IMAGE_MISSING:
+        rec.status = Status.FAT_IMAGE_MISSING
+        rec.reason = f"regenerate: fat image not present: {entry_tag}"
+    elif rc == _regenerate.EXIT_OUTCOME_MISMATCH:
+        rec.status = Status.REGENERATE_MISMATCH
+        rec.reason = "regenerate: outcome did not match entry's category"
+    else:
+        rec.status = Status.REGENERATE_MISMATCH
+        rec.reason = f"regenerate returned unexpected rc={rc}"
+    return "handled"
+
+
+def _sde_to_yyyymmdd(sde: int | None) -> str:
+    if sde is None:
+        return "????????"
+    return dt.datetime.fromtimestamp(int(sde), tz=dt.timezone.utc).strftime("%Y%m%d")
+
+
 def _resolve_metadata(candidate: dict) -> tuple[str, bool, dt.date | None]:
     """Return (rust_msrv, msrv_detected, commit_date).
 
@@ -252,6 +364,7 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
             build_missing_bases: bool, regenerate_verify: bool,
             timeout_s: int, host_label: str | None,
             max_sde_date: dt.date,
+            reassemble_stale: bool = False,
             db: PipelineDB | None = None,
             run_id: str | None = None,
             db_lock: threading.Lock | None = None) -> DriveRecord:
@@ -268,6 +381,28 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
         return rec
     rec.rust_msrv = rust_msrv
     rec.commit_date = commit_date.isoformat()
+
+    # --- Short-circuit: existing entry on disk ---
+    # If an entry JSON was produced by a prior host, we do NOT re-run the
+    # full pipeline (which would overwrite it). Instead, we verify the
+    # current bucketer agrees with the entry's recorded fatImage and, if
+    # so, hand off to cargo_regenerate which merges per-arch fingerprints
+    # and appends a verifiedOn record. If the bucketer disagrees, we park
+    # the candidate as entry_bucket_stale so the operator can decide
+    # whether to re-assemble (--reassemble-stale) or accept the old entry.
+    entry_id = f"cargo-{candidate['post_commit'][:8]}"
+    existing_entry_path = out_dir / f"{entry_id}.json"
+    if existing_entry_path.exists():
+        action = _regenerate_or_flag_stale(
+            candidate, existing_entry_path, rust_msrv, commit_date,
+            max_sde_date, reassemble_stale, rec,
+            logs_dir=logs_dir, host_label=host_label,
+            timeout_s=timeout_s,
+        )
+        if action == "handled":
+            return rec
+        # action == "fall_through" — stale + --reassemble-stale was set.
+        print(f"[{key}] stale entry, --reassemble-stale set — re-running pipeline", file=sys.stderr)
 
     # --- 1b': enforce max_sde_date. Candidates with commit_date later than
     # the run's max_sde_date are rejected — the run is configured to stop
@@ -500,6 +635,13 @@ def main() -> int:
                    help="Skip the fat-image availability check at startup. "
                         "Default is to fail fast if any candidate's canonical "
                         "fat-image tag is not locally present as a Docker image.")
+    p.add_argument("--reassemble-stale", action="store_true",
+                   help="When an existing entry JSON's fatImage disagrees with "
+                        "what the current bucketer produces, discard the entry "
+                        "and re-reproduce from scratch. Default: park the "
+                        "candidate as entry_bucket_stale — an operator signal "
+                        "that bucketing logic or max_sde_date changed since "
+                        "the entry was written.")
     p.add_argument("--cargo-cache", default=None,
                    help="Host directory bind-mounted into every reproducer "
                         "container at /usr/local/cargo. First candidate pulls "
@@ -622,6 +764,7 @@ def main() -> int:
             timeout_s=args.timeout,
             host_label=args.host,
             max_sde_date=max_sde_date,
+            reassemble_stale=args.reassemble_stale,
             db=db,
             run_id=run_id,
             db_lock=db_lock,
