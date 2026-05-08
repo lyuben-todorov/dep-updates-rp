@@ -12,7 +12,7 @@ images are on disk, how to run a batch) lives in
 | --- | --- |
 | What's the reproducibility claim? | **Environmental equivalence.** Two hosts "agree on the same environment" iff their fat image emits the same sha256 over `/manifest/{packages,rustc,cargo,os-release,sources.list}`. |
 | Why not byte-identical OCI digests? | Apt-internal non-determinism (pkgcache.bin ordering, log timestamps, etc.) jitters OCI layers by ~tens of bytes per `RUN` *even with pinned `SOURCE_DATE_EPOCH` + pinned apt snapshot*. Documented below. |
-| Is this RB.org canon? | No. RB.org defines reproducibility as bit-for-bit. We consciously relax to environment equivalence because it's what the supervisor actually asked for ("ship a regeneration script") and what survives contact with apt. |
+| Is this RB.org canon? | No. RB.org defines reproducibility as bit-for-bit. We consciously relax to environment equivalence because that's what answers the research question ("can a consumer reproduce the reported dependency-update outcome from a recipe?") and what survives contact with apt's internal non-determinism. |
 | What's the contract? | Entry JSON records `fatImage.{rustVersion, sourceDateEpoch, aptSnapshot, debianRelease}` + `environmentFingerprints[]` — one entry per container platform (`linux/arm64`, `linux/amd64`, ...), each with `{platform, digest, files[]}`. Regenerator rebuilds, recomputes fingerprint, looks up the expected digest by this host's container platform, asserts equality. Mismatch for a recorded platform is a hard fail; a container platform not yet in the list is appended on first run (schema v0.0.5). |
 | Is the OCI digest recorded at all? | Yes, as `fatImage.expectedDigest`. Advisory only — mismatch logged as a warning for cross-host drift analysis, not a fail. |
 
@@ -185,9 +185,11 @@ image, extracts `/manifest/*`, recomputes the digest, asserts equality.
 
 - **Thin per-entry images.** Their byte-reproducibility requires
   `cargo vendor` determinism + `-Cmetadata` hashing + proc-macro
-  determinism — out of scope. Thin-image digests are recorded
-  advisorily (`reproduction.thinImages.{expectedPre, expectedPost,
-  expectedFix}`) but not load-bearing.
+  determinism — out of scope. The schema reserves
+  `reproduction.thinImages.{expectedPre, expectedPost, expectedFix}`
+  as an optional slot for future cross-host thin-image-digest studies,
+  but the assembler currently writes `null` and the regenerator does
+  not check thin-image digests. Non-load-bearing today.
 - **Non-fat toolchain properties.** Kernel version, CPU flags, glibc —
   host-level, outside the fat image's control. If a reproduction drifts
   due to host kernel, the fingerprint will match but outcome may
@@ -255,8 +257,8 @@ Fat-image tag convention: `rp2026/cargo-fat:<rust-patch>-<debian>-<yyyymmdd>`.
 
 | Risk | Mitigation |
 | --- | --- |
-| `snapshot.debian.org` eviction for old buster dates | Documented lower bound at ~2020-Q2 for buster-security. `repro-sources-list.sh` locally patched for pre-bullseye URL layout. Test commands in `running-a-batch.md` troubleshooting. |
-| Cross-architecture fingerprint drift | `packages.txt` includes `${Architecture}`, so arm64 and amd64 fingerprints differ deliberately. `verifiedOn[]` records per-host arch for analysis. |
+| `snapshot.debian.org` eviction for old dates | Snapshot coverage is stable for buster / bullseye / bookworm within our current bucketing window. `repro-sources-list.sh` is locally patched for the pre-bullseye security-URL layout (buster/stretch/jessie). Stretch is supported by `snapshot.debian.org/archive/debian-security` through stretch LTS EOL (2022-07) and is a candidate for bucketing-grid extension to cover pre-2019 candidates (currently deferred; see the `OPENSSL_VERSION_DETECT` cohort in the 200-slice report). Test commands in `running-a-batch.md` troubleshooting. |
+| Cross-architecture fingerprint divergence | First-class in v0.0.5: `reproduction.environmentFingerprints[]` is a list keyed by container platform. `packages.txt` + `rustc.txt` + `cargo.txt` all differ deterministically between arm64 and amd64 (package `${Architecture}` suffix, rustc/cargo `host` triple), so each arch has its own expected digest. The regenerator looks up the expected digest by the current host's container platform; a container platform not yet in the list is appended on first run. |
 | Private PR commits GC'd | Archive the commit's tree to the entry at ingestion (future work, ~1 MB compressed per entry). Not implemented. |
 | `cargo vendor` non-determinism | Rare but possible. Double-build on same machine before trusting cross-host results. |
 | Buildx version skew across hosts | Document the buildx version on each `verifiedOn` record (future field). Minimum currently: `buildx >= 0.20` with `docker-container` driver. |
