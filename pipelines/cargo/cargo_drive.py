@@ -333,7 +333,15 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
     # fix-after-update requires a third commit we don't have at ingestion.
     if not repro.pre_passed:
         rec.status = Status.NOT_REPRODUCIBLE
-        rec.reason = f"pre_build_failed (pre_rc={repro.pre_exit_code}, post_rc={repro.post_exit_code})"
+        # exit 124 is our reproducer-side timeout marker. Distinguish it
+        # from real cargo errors so the drive_state readout + dashboards
+        # can separate "we don't know" from "we know it fails".
+        if repro.pre_exit_code == 124 or repro.post_exit_code == 124:
+            rec.reason = (f"pre_build_timed_out (pre_rc={repro.pre_exit_code}, "
+                          f"post_rc={repro.post_exit_code}, timeout_s={timeout_s})")
+        else:
+            rec.reason = (f"pre_build_failed (pre_rc={repro.pre_exit_code}, "
+                          f"post_rc={repro.post_exit_code})")
         return rec
 
     if not repro.post_passed:

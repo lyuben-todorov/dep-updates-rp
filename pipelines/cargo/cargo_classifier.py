@@ -34,6 +34,13 @@ TEST_FAIL_MARKERS = (
     "assertion failed",
 )
 
+# Our reproducer writes this marker when subprocess.run timed out. The
+# classifier needs to catch it BEFORE the generic TEST_FAIL_MARKERS so
+# that a test that hung + was killed doesn't get classified as
+# TEST_FAILURE (the test never finished, so we can't claim it failed on
+# merit).
+REPRODUCER_TIMEOUT_MARKER = "error: reproducer timeout — cargo test exceeded"
+
 RESOLUTION_MARKERS = (
     "error: failed to select a version",
     "error: no matching package named",
@@ -104,6 +111,16 @@ def classify(log_text: str) -> Classification:
         )
 
     low = log_text.lower()
+
+    # Reproducer-side timeout takes highest priority. A hung test that was
+    # killed by us is neither TEST_FAILURE (we don't know the outcome) nor
+    # a compile error — it's an environmental/resource classification.
+    if REPRODUCER_TIMEOUT_MARKER.lower() in low:
+        return Classification(
+            topCategory=TopFailureCategory.ENVIRONMENT_FAILURE.value,
+            subCategory="TEST_TIMEOUT",
+            errorCodes=[],
+        )
 
     # Build-script environmental panics come before the generic markers — the
     # openssl / codegen cases would otherwise fall through to OTHER.

@@ -218,11 +218,27 @@ def _run_in_docker(
             return r.returncode
         except subprocess.TimeoutExpired:
             # Don't leave the container running — it'll hold the worker.
-            subprocess.run(
-                ["docker", "kill", container_name],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=15,
-            )
+            # The kill itself can slow-path under heavy Docker daemon load
+            # (seen with N=8 during bulk container cleanup). Swallow a
+            # kill-timeout and return the reproduction-timeout code anyway
+            # — a zombie container costs less than a lost candidate record.
+            try:
+                subprocess.run(
+                    ["docker", "kill", container_name],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=30,
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+            # Write a clear marker to the log so the classifier can route
+            # this to TEST_TIMEOUT rather than OTHER.
+            try:
+                f.write(
+                    f"\nerror: reproducer timeout — cargo test exceeded "
+                    f"{timeout_s} seconds and was killed\n".encode("utf-8")
+                )
+            except OSError:
+                pass
             return 124
 
 
