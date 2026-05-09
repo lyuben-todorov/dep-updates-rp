@@ -6,7 +6,7 @@ After=network-online.target
 Type=oneshot
 User=ltodorov
 Environment=CACHE_DIR=/home/ltodorov/rp2026/data/cargo-cache
-Environment=OUT=/var/lib/prometheus-node-exporter/textfile-collector/cargo_cache.prom
+Environment=OUT=/var/lib/prometheus/node-exporter/cargo_cache.prom
 ExecStart=/home/ltodorov/rp2026/deploy/cache-metrics.sh
 Nice=10
 IOSchedulingClass=idle

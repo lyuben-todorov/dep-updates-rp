@@ -18,20 +18,20 @@ into the existing Prometheus / Grafana stack:
 ## Install (crack)
 
 Requires `node_exporter` to already be running with the textfile collector
-enabled. Default path is `/var/lib/prometheus-node-exporter/textfile-collector/`.
+enabled. Default path is `/var/lib/prometheus/node-exporter/`.
 If not enabled, add `--collector.textfile.directory=<path>` to the
 node_exporter flags and reload.
 
 ```sh
 # 1. Create the collector dir if missing
-sudo mkdir -p /var/lib/prometheus-node-exporter/textfile-collector
-sudo chown prometheus: /var/lib/prometheus-node-exporter/textfile-collector
+sudo mkdir -p /var/lib/prometheus/node-exporter
+sudo chown prometheus: /var/lib/prometheus/node-exporter
 
 # 2. Let the user write there (textfile collector runs as prometheus user,
 #    but our script runs as ltodorov). Two options:
 #    a) make the directory group-writable by a shared group
 #    b) give ltodorov write access via ACL
-sudo setfacl -m u:ltodorov:rwx /var/lib/prometheus-node-exporter/textfile-collector
+sudo setfacl -m u:ltodorov:rwx /var/lib/prometheus/node-exporter
 
 # 3. Install units (either system-wide as root, or user units)
 sudo cp cache-metrics.service /etc/systemd/system/
@@ -41,7 +41,7 @@ sudo systemctl enable --now cache-metrics.timer
 
 # 4. Verify
 systemctl status cache-metrics.timer
-cat /var/lib/prometheus-node-exporter/textfile-collector/cargo_cache.prom
+cat /var/lib/prometheus/node-exporter/cargo_cache.prom
 curl -s localhost:9100/metrics | grep cargo_
 ```
 

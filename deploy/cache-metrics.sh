@@ -13,7 +13,7 @@
 set -euo pipefail
 
 CACHE_DIR=${CACHE_DIR:-$HOME/rp2026/data/cargo-cache}
-OUT=${OUT:-/var/lib/prometheus-node-exporter/textfile-collector/cargo_cache.prom}
+OUT=${OUT:-/var/lib/prometheus/node-exporter/cargo_cache.prom}
 
 du_bytes() {
   local path="$1"
