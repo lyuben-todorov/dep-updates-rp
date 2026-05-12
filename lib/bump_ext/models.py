@@ -116,7 +116,7 @@ class FatImage(BaseModel):
     rustVersion: str = Field(pattern=r"^\d+\.\d+\.\d+$")
     sourceDateEpoch: int = Field(ge=0)
     aptSnapshot: str = Field(pattern=r"^[0-9]{8}T[0-9]{6}Z$")
-    debianRelease: str = Field(pattern=r"^(buster|bullseye|bookworm|trixie)$")
+    debianRelease: str = Field(pattern=r"^(stretch|buster|bullseye|bookworm|trixie)$")
     expectedDigest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
 
 

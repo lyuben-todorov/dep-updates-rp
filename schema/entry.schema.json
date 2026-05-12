@@ -118,7 +118,7 @@
             "debianRelease": {
               "type": "string",
               "description": "Debian codename, e.g. 'bookworm'.",
-              "enum": ["buster", "bullseye", "bookworm", "trixie"]
+              "enum": ["stretch", "buster", "bullseye", "bookworm", "trixie"]
             },
             "expectedDigest": {
               "type": ["string", "null"],
