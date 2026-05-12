@@ -139,6 +139,70 @@
       ],
       "firstSeenAt": "2026-05-12",
       "notes": "stretch-era image for 2018-2019 Rust code; added to recover the 378 OPENSSL_MISMATCH failures"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.39.0-stretch-20191123",
+      "rustVersion": "1.39.0",
+      "sourceDateEpoch": 1574467200,
+      "aptSnapshot": "20191123T000000Z",
+      "debianRelease": "stretch",
+      "environmentFingerprints": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:7864010933b21a448e2a8853ffb045d09a9f988d2eacddd4adcde295d31fd884",
+          "packageCount": 448
+        }
+      ],
+      "firstSeenAt": "2026-05-12",
+      "notes": "stretch/buster 1.39 for OpenSSL retry cohort"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.39.0-buster-20191231",
+      "rustVersion": "1.39.0",
+      "sourceDateEpoch": 1577750400,
+      "aptSnapshot": "20191231T000000Z",
+      "debianRelease": "buster",
+      "environmentFingerprints": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:18ea4afcca752ea9adfc6aa9f37cc012a8fd55f4bfcfb12f3e72d8fbe8b15516",
+          "packageCount": 462
+        }
+      ],
+      "firstSeenAt": "2026-05-12",
+      "notes": "stretch/buster 1.39 for OpenSSL retry cohort"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.39.0-buster-20201231",
+      "rustVersion": "1.39.0",
+      "sourceDateEpoch": 1609372800,
+      "aptSnapshot": "20201231T000000Z",
+      "debianRelease": "buster",
+      "environmentFingerprints": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:31fe12446694d32212099d4c1c511d79b03397708d7d47483e3c5d972ea591c4",
+          "packageCount": 462
+        }
+      ],
+      "firstSeenAt": "2026-05-12",
+      "notes": "stretch/buster 1.39 for OpenSSL retry cohort"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.39.0-buster-20211231",
+      "rustVersion": "1.39.0",
+      "sourceDateEpoch": 1640908800,
+      "aptSnapshot": "20211231T000000Z",
+      "debianRelease": "buster",
+      "environmentFingerprints": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:3f6db8e9b8eeda01dcbe358897b006f0b9de0e5f931d138f012bba8c74ef2498",
+          "packageCount": 462
+        }
+      ],
+      "firstSeenAt": "2026-05-12",
+      "notes": "stretch/buster 1.39 for OpenSSL retry cohort"
     }
   ]
 }
