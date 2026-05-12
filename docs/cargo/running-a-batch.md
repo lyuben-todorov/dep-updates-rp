@@ -172,7 +172,7 @@ don't exist there; bookworm+ gets GUI by default).
 ```bash
 mkdir -p data/cargo-logs data/rebatchi/batch
 
-python3 -m pipelines.cargo.cargo_drive \
+nohup python3 -m pipelines.cargo.cargo_drive \
   --candidates data/rebatchi/ds1_candidates_enriched.jsonl \
   --out-dir data/cargo/ \
   --logs-dir data/cargo-logs/ \
@@ -181,9 +181,13 @@ python3 -m pipelines.cargo.cargo_drive \
   --run-id ds1-$(date +%Y%m%d)-$(hostname) \
   --max-sde-date 2023-12-31 \
   --timeout 1800 \
+  --parallel 5 \
   --host $(hostname) \
-  2>&1 | tee data/rebatchi/batch/drive.log
+  >> data/rebatchi/batch/drive.log 2>&1 &
 ```
+
+`nohup ... &` plus the `--state` JSONL means the run survives SSH
+disconnects and resumes correctly on reconnect / restart.
 
 Note: `--out-dir data/cargo/` writes into the submodule working tree.
 To publish entries, `cd data/cargo && git commit + push` after the run
@@ -192,30 +196,60 @@ reproduction attempts + entries into `data/pipeline.sqlite` for
 querying; the JSONL remains authoritative for resume logic.
 
 Per-candidate work:
-- ~5 min reproduction (pre + post commits inside Docker, `cargo test`).
+- 5-15 min reproduction (pre + post commits inside Docker, `cargo test`).
+  Heavy workspaces (libra/diem/solana) take much longer.
 - Instant classification + assembly.
 
-Full DS1 expected wall time: **3-4 days of Docker time** assuming
-average ~5 minutes per candidate × 2608 candidates. Bound by Docker's
-per-build serialization.
+Full DS1 wall time on `crack` (16-core, 32 GiB) at `--parallel 5`:
+**~2.5 days** observed (2608 candidates, 2026-05-08 → 2026-05-12),
+peak ~50 candidates/hour with warm cache. Network-bound rather than
+CPU-bound on a WiFi uplink.
 
 Can stop + resume — on restart, candidates with a terminal status in
-the state JSONL are skipped.
+the state JSONL are skipped. SIGTERM/SIGINT trigger a graceful
+shutdown that kills tracked containers cleanly (no orphan
+`cargo-repro-*` containers under the docker daemon).
+
+### Useful flags
+
+- `--parallel N` — thread-pool worker count. 5 is the sweet spot on
+  a 32 GiB host with the per-container memory cap. 8 risks linker
+  OOM on libra/diem-sized workspaces.
+- `--force-fat-image TAG` — bypasses the bucketer, routes every
+  candidate to TAG. Used for hypothesis-driven retries (e.g.
+  routing the OPENSSL_MISMATCH cohort to a stretch image regardless
+  of commit date). TAG must already be registered in the index and
+  present in the local Docker daemon.
+- `--reassemble-stale` — when an existing entry's recorded fatImage
+  doesn't match what the bucketer produces today, re-reproduce from
+  scratch instead of parking the candidate as `entry_bucket_stale`.
+- `--skip-preflight` — skip the fat-image presence check. Failures
+  for missing images get recorded as `fat_image_missing`. Useful for
+  partial runs where some images aren't built yet.
 
 ### Status distribution you should expect
 
-From the 500-candidate sample:
-- ~20% `ok` (entries written; mostly `breaking`)
-- ~75% `not_reproducible` with `pre=0, post=0` (non-breaking
-  Dependabot PRs — the dependency bump compiled cleanly, no regression)
-- ~3-5% `not_reproducible` with other patterns (pre fails = old toolchain
-  can't build the project at all; env errors)
-- handful `fat_image_missing` or `metadata_fetch_failed` (tolerable tail)
+DS1-full (n=2608) under canonical bucketer, 2026-05-12:
 
-Non-breaking PRs aren't a pipeline failure — they're data. The current
-driver marks them `not_reproducible` because we only emit entries for
-outcomes that match the schema's reproducibility contract for their
-category. (Future work: emit non-breaking entries too.)
+- **46.4 %** `ok` — entries written. The reproducible cohort.
+- **53.5 %** `not_reproducible` — pre-commit build failed; subdivided
+  by `scripts/reclassify_failures.py` into 12 categories
+  (RUSTC_BITROT, RUNTIME_CRASH, OPENSSL_MISMATCH, NIGHTLY_REQUIRED,
+  REPO_GONE, DEPENDENCY_RESOLUTION, LOCK_FILE_STALE, TIMEOUT,
+  NATIVE_DEP_MISSING, NETWORK_ERROR, TEST_FAILURE, OTHER). See
+  `schema/failure-taxonomy.md` Scheme 2.
+- **0.1 %** `regenerate_mismatch` — entry already existed on disk
+  but `cargo_regenerate` produced a different outcome on this host
+  vs the entry's recorded category.
+
+Within `ok`, `cargo_classifier.py` runs only on candidates whose post
+commit fails (BUMP-style breaking). DS1-full produced ~20 fix-after-
+update candidates and a similar order of breaking; the bulk of `ok`
+rows are `non-breaking` (pre passed and post passed).
+
+Non-breaking PRs *do* produce entries — they're data, not silence.
+The pipeline emits an entry for every outcome whose pre/post pattern
+matches a schema-defined category.
 
 ## Step 7 — Verify (optional)
 

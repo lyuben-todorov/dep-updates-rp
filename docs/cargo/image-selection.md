@@ -52,8 +52,11 @@ Picks the `BucketKey` that identifies which fat image this PR needs.
 ### Picking the milestone
 
 The rust milestone is the smallest member of
-`MILESTONES = ["1.49", "1.56", "1.65", "1.75", "1.85", "1.92"]` whose
-rustc can compile the code.
+`MILESTONES = ["1.39", "1.49", "1.56", "1.65", "1.75", "1.85", "1.92"]`
+whose rustc can compile the code. `1.39` was added in 2026-05-12 to
+anchor the async/await cliff (async fn syntax stabilised in 1.39,
+parsing fails on 1.38-), making it a natural home for 2018-2019 Cargo
+code that otherwise had to jump straight to 1.49.
 
 - **If the candidate declares an MSRV** (from `rust-toolchain.toml` →
   `rust-toolchain` → `Cargo.toml:rust-version`), round it *up* to the
@@ -76,10 +79,16 @@ cutovers at the actual Debian release dates:
 
 | Commit date range | Debian |
 | --- | --- |
-| before 2021-08-14 | buster |
+| before 2019-07-06 | stretch |
+| 2019-07-06 → 2021-08-14 | buster |
 | 2021-08-14 → 2023-06-10 | bullseye |
 | 2023-06-10 → 2025-08-09 | bookworm |
 | ≥ 2025-08-09 | trixie |
+
+`stretch` routing was added in 2026-05-12 to pair 1.39 with an era-
+appropriate libssl-dev. Debian 9 stretch ships both libssl 1.0.2 and
+libssl 1.1.0, whereas buster jumps to 1.1.1 — and 2018-2019 `openssl-sys`
+crates pinned against 1.0.x ABI don't link against 1.1.1 headers.
 
 The planner and the driver call this helper — the caller doesn't have
 to know about the cutovers.
@@ -91,13 +100,14 @@ stops at 1.75, bullseye starts at 1.54, bookworm starts at 1.67, and
 so on. The real support grid (probed 2026-05-05):
 
 ```
-milestone  buster   bullseye  bookworm  trixie
-1.49       ✓        —         —         —
-1.56       ✓        ✓         —         —
-1.65       ✓        ✓         —         —
-1.75       ✓        ✓         ✓         —
-1.85       —        ✓         ✓         —
-1.92       —        ✓         ✓         ✓
+milestone  stretch  buster   bullseye  bookworm  trixie
+1.39       ✓        ✓        —         —         —
+1.49       —        ✓        —         —         —
+1.56       —        ✓        ✓         —         —
+1.65       —        ✓        ✓         —         —
+1.75       —        ✓        ✓         ✓         —
+1.85       —        —        ✓         ✓         —
+1.92       —        —        ✓         ✓         ✓
 ```
 
 The grid is hardcoded as `MILESTONE_DEBIAN_SUPPORTED` in `fat_image.py`
