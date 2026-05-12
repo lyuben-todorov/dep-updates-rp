@@ -60,6 +60,7 @@ CATEGORIES = (
     "LOCK_FILE_STALE",
     "OPENSSL_MISMATCH",
     "NATIVE_DEP_MISSING",
+    "NIGHTLY_REQUIRED",
     "RUSTC_BITROT",
     "TEST_FAILURE",
     "RUNTIME_CRASH",
@@ -71,17 +72,50 @@ CATEGORIES = (
     "OTHER",
 )
 
+# "error: build failed" is always the last line; it's a summary, not a cause.
+# Same with "could not compile ... due to N previous errors" when N>0.
+_GENERIC_TERMINAL = re.compile(
+    r"^(error: build failed|error: could not compile .* due to \d+ previous errors?\.?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _extract_terminal_error(clean: str) -> str | None:
+    """Walk backward through the log, return the last non-generic
+    `error:`/`error[E####]:` line. Skips the summary-only `error: build
+    failed` and `error: could not compile ... due to N previous errors`
+    forms — those restate the same fact every failed build emits, so
+    using them as the classifier's input systematically misattributes
+    causes."""
+    lines = clean.splitlines()
+    for line in reversed(lines):
+        stripped = line.strip()
+        if not stripped.lower().startswith("error"):
+            continue
+        if _GENERIC_TERMINAL.match(stripped):
+            continue
+        return stripped
+    return None
+
 
 def classify(text: str) -> tuple[str, str | None, str]:
     """Return (category, subcategory, evidence_snippet).
+
+    Prioritises the *terminal* error (the last non-generic `error:` line)
+    over opportunistic keyword matches across the whole log. Many DS1
+    candidates emit OpenSSL / env / lockfile chatter early and then die
+    on an unrelated cause hundreds of lines later; the terminal-first
+    rule prevents those from being miscategorised.
 
     subcategory is optional — e.g. error code for RUSTC_BITROT, crate
     name for TEST_FAILURE, missing package name for NATIVE_DEP_MISSING.
     """
     clean = ANSI.sub("", text)
     low = clean.lower()
+    terminal = _extract_terminal_error(clean) or ""
+    term_low = terminal.lower()
 
-    # Timeouts (our reproducer writes a specific marker).
+    # Reproducer timeout (we write the marker ourselves; it's definitive).
     if "error: reproducer timeout" in low:
         return "TIMEOUT", None, "reproducer timeout marker"
 
@@ -93,16 +127,29 @@ def classify(text: str) -> tuple[str, str | None, str]:
     if "needs to be updated but --locked" in low:
         return "LOCK_FILE_STALE", None, "--locked rejected stale lockfile"
 
-    # OpenSSL — extremely common in DS1.
-    if ("unable to detect openssl version" in low
-            or "openssl-sys" in low and "build failed" in low
-            or "failed to run custom build command for `openssl" in low):
-        return "OPENSSL_MISMATCH", None, "openssl-sys/ring build-script failure"
+    # Nightly-required. Pear, rocket 0.3/0.4 pre-Stable, and similar
+    # emit the same "incompatible compiler" marker from their build.rs.
+    if "aborting compilation due to incompatible compiler" in low:
+        # Try to name the crate that aborted.
+        m = re.search(
+            r"failed to run custom build command for `([a-zA-Z0-9_-]+) v[0-9.]+`",
+            clean,
+        )
+        sub = m.group(1) if m else None
+        return "NIGHTLY_REQUIRED", sub, "pear/rocket-style nightly-only crate"
 
-    # Other native dep via pkg-config.
+    # Terminal-error first — OpenSSL / native-dep.
+    if ("openssl-sys" in term_low and "build" in term_low) or \
+       "failed to run custom build command for `openssl" in term_low or \
+       "unable to detect openssl version" in term_low:
+        return "OPENSSL_MISMATCH", None, terminal[:120]
+
     m = PKG_CONFIG_MISSING.search(clean)
     if m:
-        return "NATIVE_DEP_MISSING", m.group(1), f"pkg-config: {m.group(1)} not found"
+        # Only classify as NATIVE_DEP_MISSING if the terminal cause is
+        # actually the pkg-config failure; otherwise fall through.
+        if "pkg-config" in term_low or "was not found" in term_low or "fuse" in term_low or "v4l2" in term_low:
+            return "NATIVE_DEP_MISSING", m.group(1), f"pkg-config: {m.group(1)} not found"
 
     # Dependency resolution (non-lockfile).
     if ("error: failed to select a version" in low
@@ -116,8 +163,9 @@ def classify(text: str) -> tuple[str, str | None, str]:
     if "panicked at" in low and ("build-script" in low or "build.rs" in low or "custom build command" in low):
         return "RUNTIME_CRASH", "BUILD_SCRIPT_PANIC", "build-script panic"
 
-    # rustc error code — the bitrot workhorse.
-    m = RUSTC_CODE.search(clean)
+    # rustc error code — the bitrot workhorse. Check the terminal line first,
+    # otherwise any error[E####] anywhere in the log.
+    m = RUSTC_CODE.search(terminal) or RUSTC_CODE.search(clean)
     if m:
         return "RUSTC_BITROT", m.group(1), f"error[{m.group(1)}]"
 
@@ -138,8 +186,7 @@ def classify(text: str) -> tuple[str, str | None, str]:
     if m:
         return "RUSTC_BITROT", None, f"could not compile {m.group(1)}"
 
-    errs = [ln.strip() for ln in clean.splitlines() if ln.strip().lower().startswith("error")]
-    return "OTHER", None, errs[-1][:120] if errs else "(no error lines)"
+    return "OTHER", None, (terminal or "(no error lines)")[:120]
 
 
 def ensure_table(conn: sqlite3.Connection) -> None:
