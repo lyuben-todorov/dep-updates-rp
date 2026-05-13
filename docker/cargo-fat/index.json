@@ -207,6 +207,38 @@
       ],
       "firstSeenAt": "2026-05-12",
       "notes": "stretch/buster 1.39 for OpenSSL retry cohort"
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.35.0-stretch-20191231",
+      "rustVersion": "1.35.0",
+      "sourceDateEpoch": 1577750400,
+      "aptSnapshot": "20191231T000000Z",
+      "debianRelease": "stretch",
+      "environmentFingerprints": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:29517ec1f3c8030b988559c73d5f5499d4bc2f2e1356aca6efd2514094f89063",
+          "packageCount": 578
+        }
+      ],
+      "firstSeenAt": "2026-05-13",
+      "notes": "round-2: NLL+edition-2018 bitrot recovery. Last pre-NLL stable rustc; full NLL stabilised in 1.36."
+    },
+    {
+      "tag": "rp2026/cargo-fat:1.35.0-stretch-20190619",
+      "rustVersion": "1.35.0",
+      "sourceDateEpoch": 1560902400,
+      "aptSnapshot": "20190619T000000Z",
+      "debianRelease": "stretch",
+      "environmentFingerprints": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:169525c577602122dbddf73cf74956bde2cd1476a7d321853ba94f8e542d8d63",
+          "packageCount": 578
+        }
+      ],
+      "firstSeenAt": "2026-05-13",
+      "notes": "round-2: NLL+edition-2018 bitrot recovery. Last pre-NLL stable rustc; full NLL stabilised in 1.36."
     }
   ]
 }
