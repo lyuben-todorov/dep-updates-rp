@@ -459,6 +459,18 @@ def register(record: FatImageRecord, path: Path = INDEX_PATH,
     save_index(records, path)
 
 
+def unregister(tag: str, path: Path = INDEX_PATH) -> bool:
+    """Remove `tag` from the index. Returns True if removed, False if it
+    wasn't present. Doesn't touch the actual image (use `docker rmi`
+    separately if you want that gone too)."""
+    records = load_index(path)
+    new = [r for r in records if r.tag != tag]
+    if len(new) == len(records):
+        return False
+    save_index(new, path)
+    return True
+
+
 # ---- build helper ------------------------------------------------------------
 
 def fat_image_tag(rust_version: str, debian_release: str, sde: int) -> str:
@@ -714,6 +726,14 @@ def _cli_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cli_unregister(args: argparse.Namespace) -> int:
+    if unregister(args.tag):
+        print(f"unregistered {args.tag}")
+        return 0
+    print(f"tag not in index: {args.tag}", file=sys.stderr)
+    return 1
+
+
 def _cli_register(args: argparse.Namespace) -> int:
     try:
         record = introspect_fat_image(args.tag)
@@ -762,8 +782,13 @@ def main() -> int:
                           "instead of failing with 'tag already registered'. "
                           "Used when rebuilding an image under its existing name.")
 
+    pu = sub.add_parser("unregister", help="Remove a tag from the index "
+                                           "(doesn't delete the docker image).")
+    pu.add_argument("--tag", required=True, help="Image tag to remove from the index.")
+
     args = p.parse_args()
-    cmds = {"list": _cli_list, "resolve": _cli_resolve, "build": _cli_build, "register": _cli_register}
+    cmds = {"list": _cli_list, "resolve": _cli_resolve, "build": _cli_build,
+            "register": _cli_register, "unregister": _cli_unregister}
     return cmds[args.cmd](args)
 
 
