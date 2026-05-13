@@ -804,9 +804,14 @@ def _reclassify_mode(args) -> int:
         print("ERROR: --reclassify requires both --db and --run-id",
               file=sys.stderr)
         return 2
-    logs_dir = Path(args.logs_dir)
+    # Logs live under <logs_dir>/<run_id>/ from May 2026 onward. Older
+    # runs put them in the flat <logs_dir>/. Prefer the per-run subdir
+    # when it exists; fall back to the flat directory.
+    logs_base = Path(args.logs_dir)
+    per_run_dir = logs_base / args.run_id
+    logs_dir = per_run_dir if per_run_dir.is_dir() else logs_base
     if not logs_dir.is_dir():
-        print(f"ERROR: --logs-dir {logs_dir} does not exist", file=sys.stderr)
+        print(f"ERROR: --logs-dir {logs_base} does not exist", file=sys.stderr)
         return 2
 
     # candidate_key -> post_commit[:8] for log lookup. The candidates JSONL
@@ -986,9 +991,22 @@ def main() -> int:
         return 2
 
     out_dir = Path(args.out_dir)
-    logs_dir = Path(args.logs_dir)
     state_path = Path(args.state)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Logs go under <logs_dir>/<run_id>/ so each run's per-candidate
+    # pre/post log files live in their own subdirectory. Previously every
+    # run's logs piled into a single flat directory; with run-id-suffixed
+    # filenames that was at least no-overwrite-safe, but it scaled to ~5k
+    # files per run and made forensic auditing painful (which run did this
+    # log come from?). Per-run subdirs make `ls`+`grep` workable and let
+    # you tar up a run cleanly. Resolve run_id early so the path is final
+    # before any worker writes.
+    host_for_run = args.host or socket.gethostname()
+    run_id_resolved = args.run_id or (
+        f"drive-{host_for_run}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    )
+    logs_dir = Path(args.logs_dir) / run_id_resolved
 
     # Cargo cache: set the env var `_reproducer` reads. Create dir now so the
     # first worker doesn't race on mkdir; chmod 0777 so containers running
@@ -1022,11 +1040,10 @@ def main() -> int:
     run_id: str | None = None
     if args.db:
         db = PipelineDB(Path(args.db))
-        host = args.host or socket.gethostname()
-        run_id = args.run_id or f"drive-{host}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        run_id = run_id_resolved
         db.start_run(
             run_id=run_id,
-            host=host,
+            host=host_for_run,
             git_sha=_git_sha(),
             candidates_source=str(Path(args.candidates).resolve()),
             max_sde_date=max_sde_date,
