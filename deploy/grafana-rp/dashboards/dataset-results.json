@@ -1,20 +1,34 @@
 {
   "title": "Dataset Results",
   "uid": "dataset-results",
-  "tags": ["rp2026", "thesis", "rq", "single-run"],
+  "tags": [
+    "rp2026",
+    "thesis",
+    "rq",
+    "single-run"
+  ],
   "timezone": "browser",
   "refresh": "30s",
   "schemaVersion": 39,
-  "time": {"from": "now-90d", "to": "now"},
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "run_id",
         "label": "Run",
         "type": "query",
-        "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+        "datasource": {
+          "type": "frser-sqlite-datasource",
+          "uid": "pipeline-sqlite"
+        },
         "query": "SELECT DISTINCT run_id FROM drive_state ORDER BY run_id DESC",
-        "current": {"text": "ds1-full-crack-r2", "value": "ds1-full-crack-r2"},
+        "current": {
+          "text": "ds1-full-crack-r2",
+          "value": "ds1-full-crack-r2"
+        },
         "includeAll": false,
         "multi": false,
         "refresh": 2
@@ -26,243 +40,789 @@
       "id": 1,
       "title": "Single-dataset view: $run_id",
       "type": "text",
-      "gridPos": {"h": 2, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "options": {
         "mode": "markdown",
-        "content": "**RQ1** Reproducibility rate · **RQ2** Breaking rate · **RQ3** Temporal variation · **RQ4** Failure-mode taxonomy. All panels scoped to the run selected above."
+        "content": "**RQ1** Reproducibility rate \u00b7 **RQ2** Breaking rate \u00b7 **RQ3** Temporal variation \u00b7 **RQ4** Failure-mode taxonomy. All panels scoped to the run selected above."
       }
     },
     {
       "id": 100,
-      "title": "RQ1 — Reproducibility rate",
+      "title": "RQ1 \u2014 Reproducibility rate",
       "type": "stat",
-      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 2},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS value FROM drive_state WHERE run_id = '$run_id'",
-        "queryText": "SELECT ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS value FROM drive_state WHERE run_id = '$run_id'",
-        "timeColumns": []
-      }],
-      "fieldConfig": {"defaults": {"unit": "percent", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 40}, {"color": "yellow", "value": 50}, {"color": "green", "value": 60}]}}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value"}
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 2
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS value FROM drive_state WHERE run_id = '$run_id'",
+          "queryText": "SELECT ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS value FROM drive_state WHERE run_id = '$run_id'",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 40
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 60
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      }
     },
     {
       "id": 101,
       "title": "Cohort size",
       "type": "stat",
-      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 2},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id'",
-        "queryText": "SELECT COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id'",
-        "timeColumns": []
-      }],
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 2
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id'",
+          "queryText": "SELECT COUNT(*) AS value FROM drive_state WHERE run_id = '$run_id'",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
     },
     {
       "id": 102,
       "title": "Reproducible (incl. ok_after_relock)",
       "type": "stat",
-      "gridPos": {"h": 5, "w": 8, "x": 16, "y": 2},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS value FROM drive_state WHERE run_id = '$run_id'",
-        "queryText": "SELECT SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS value FROM drive_state WHERE run_id = '$run_id'",
-        "timeColumns": []
-      }],
-      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "green"}}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 2
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS value FROM drive_state WHERE run_id = '$run_id'",
+          "queryText": "SELECT SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS value FROM drive_state WHERE run_id = '$run_id'",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
     },
     {
       "id": 110,
-      "title": "RQ1 — Outcome distribution",
+      "title": "RQ1 \u2014 Outcome distribution",
       "type": "piechart",
-      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 7},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT status, COUNT(*) AS n FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY n DESC",
-        "queryText": "SELECT status, COUNT(*) AS n FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY n DESC",
-        "timeColumns": []
-      }],
-      "options": {"pieType": "donut", "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}, "displayLabels": ["percent"]}
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT status, COUNT(*) AS n FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY n DESC",
+          "queryText": "SELECT status, COUNT(*) AS n FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
     },
     {
       "id": 111,
-      "title": "RQ1 — Outcome counts",
+      "title": "RQ1 \u2014 Outcome counts",
       "type": "table",
-      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 7},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT status, COUNT(*) AS n, ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM drive_state WHERE run_id='$run_id'), 1) AS pct FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY n DESC",
-        "queryText": "SELECT status, COUNT(*) AS n, ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM drive_state WHERE run_id='$run_id'), 1) AS pct FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY n DESC",
-        "timeColumns": []
-      }],
-      "fieldConfig": {"defaults": {}, "overrides": [{"matcher": {"id": "byName", "options": "pct"}, "properties": [{"id": "unit", "value": "percent"}]}]},
-      "options": {"showHeader": true}
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT status, COUNT(*) AS n, ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM drive_state WHERE run_id='$run_id'), 1) AS pct FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY n DESC",
+          "queryText": "SELECT status, COUNT(*) AS n, ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM drive_state WHERE run_id='$run_id'), 1) AS pct FROM drive_state WHERE run_id = '$run_id' GROUP BY status ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pct"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 200,
-      "title": "RQ2 — Breaking vs non-breaking (over reproducible cohort)",
+      "title": "RQ2 \u2014 Breaking vs non-breaking (over reproducible cohort)",
       "type": "piechart",
-      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 16},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') GROUP BY e.category ORDER BY n DESC",
-        "queryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') GROUP BY e.category ORDER BY n DESC",
-        "timeColumns": []
-      }],
-      "options": {"pieType": "donut", "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}, "displayLabels": ["percent"]}
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') GROUP BY e.category ORDER BY n DESC",
+          "queryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') GROUP BY e.category ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
     },
     {
       "id": 201,
-      "title": "RQ2 — Bump-type × breaking",
+      "title": "RQ2 \u2014 Patch bumps: breaking vs non-breaking",
       "type": "piechart",
-      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 16},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT e.version_update_type || ' (' || e.category || ')' AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') GROUP BY e.version_update_type, e.category ORDER BY n DESC",
-        "queryText": "SELECT e.version_update_type || ' (' || e.category || ')' AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') GROUP BY e.version_update_type, e.category ORDER BY n DESC",
-        "timeColumns": []
-      }],
-      "options": {"pieType": "donut", "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}, "displayLabels": ["percent"]}
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='patch' GROUP BY e.category ORDER BY n DESC",
+          "queryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='patch' GROUP BY e.category ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 202,
+      "title": "RQ2 \u2014 Minor bumps: breaking vs non-breaking",
+      "type": "piechart",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='minor' GROUP BY e.category ORDER BY n DESC",
+          "queryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='minor' GROUP BY e.category ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 203,
+      "title": "RQ2 \u2014 Major bumps: breaking vs non-breaking",
+      "type": "piechart",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='major' GROUP BY e.category ORDER BY n DESC",
+          "queryText": "SELECT e.category AS metric, COUNT(*) AS n FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='major' GROUP BY e.category ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
     },
     {
       "id": 210,
-      "title": "RQ2 — Top breaking deps (≥2 PRs)",
+      "title": "RQ2 \u2014 Top breaking deps (\u22652 PRs)",
       "type": "table",
-      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 26},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT e.dep_name AS dependency, COUNT(*) AS breaking_prs, GROUP_CONCAT(DISTINCT e.previous_version || '→' || e.new_version) AS sample_bumps FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.category='breaking' GROUP BY e.dep_name HAVING breaking_prs >= 2 ORDER BY breaking_prs DESC LIMIT 25",
-        "queryText": "SELECT e.dep_name AS dependency, COUNT(*) AS breaking_prs, GROUP_CONCAT(DISTINCT e.previous_version || '→' || e.new_version) AS sample_bumps FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.category='breaking' GROUP BY e.dep_name HAVING breaking_prs >= 2 ORDER BY breaking_prs DESC LIMIT 25",
-        "timeColumns": []
-      }],
-      "options": {"showHeader": true}
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT e.dep_name AS dependency, COUNT(*) AS breaking_prs, GROUP_CONCAT(DISTINCT e.previous_version || '\u2192' || e.new_version) AS sample_bumps FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.category='breaking' GROUP BY e.dep_name HAVING breaking_prs >= 2 ORDER BY breaking_prs DESC LIMIT 25",
+          "queryText": "SELECT e.dep_name AS dependency, COUNT(*) AS breaking_prs, GROUP_CONCAT(DISTINCT e.previous_version || '\u2192' || e.new_version) AS sample_bumps FROM drive_state d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.run_id='$run_id' AND d.status IN ('ok','ok_after_relock') AND e.category='breaking' GROUP BY e.dep_name HAVING breaking_prs >= 2 ORDER BY breaking_prs DESC LIMIT 25",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 300,
-      "title": "RQ3 — Reproducibility rate over time (monthly)",
+      "title": "RQ3 \u2014 Reproducibility rate over time (monthly)",
       "type": "timeseries",
-      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 35},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "time series",
-        "rawQueryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS reproducibility_pct FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
-        "queryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS reproducibility_pct FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
-        "timeColumns": ["time"]
-      }],
-      "fieldConfig": {"defaults": {"unit": "percent", "custom": {"drawStyle": "line", "lineInterpolation": "linear", "pointSize": 5, "showPoints": "always", "fillOpacity": 10, "lineWidth": 2}, "color": {"mode": "fixed", "fixedColor": "green"}}},
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}}
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS reproducibility_pct FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "queryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS reproducibility_pct FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 5,
+            "showPoints": "always",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
     },
     {
       "id": 301,
-      "title": "RQ3 — Cohort size over time (monthly)",
+      "title": "RQ3 \u2014 Cohort size over time (monthly)",
       "type": "timeseries",
-      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 45},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "time series",
-        "rawQueryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, COUNT(*) AS candidates FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
-        "queryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, COUNT(*) AS candidates FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
-        "timeColumns": ["time"]
-      }],
-      "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 50, "lineWidth": 1}, "color": {"mode": "fixed", "fixedColor": "blue"}}},
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}}
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 55
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, COUNT(*) AS candidates FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "queryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, COUNT(*) AS candidates FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "lineWidth": 1
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
     },
     {
       "id": 302,
-      "title": "RQ3 — ok / not_reproducible split over time",
+      "title": "RQ3 \u2014 ok / not_reproducible split over time",
       "type": "timeseries",
-      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 45},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "time series",
-        "rawQueryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN status='not_reproducible' THEN 1 ELSE 0 END) AS not_reproducible FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
-        "queryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN status='not_reproducible' THEN 1 ELSE 0 END) AS not_reproducible FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
-        "timeColumns": ["time"]
-      }],
-      "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "stacking": {"mode": "normal"}, "fillOpacity": 80, "lineWidth": 1}}, "overrides": [{"matcher": {"id": "byName", "options": "ok"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]}, {"matcher": {"id": "byName", "options": "not_reproducible"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}]},
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 55
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN status='not_reproducible' THEN 1 ELSE 0 END) AS not_reproducible FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "queryText": "SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN status='not_reproducible' THEN 1 ELSE 0 END) AS not_reproducible FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "stacking": {
+              "mode": "normal"
+            },
+            "fillOpacity": 80,
+            "lineWidth": 1
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ok"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "not_reproducible"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     },
     {
       "id": 303,
-      "title": "RQ3 — Yearly summary",
+      "title": "RQ3 \u2014 Yearly summary",
       "type": "table",
-      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 54},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT SUBSTR(commit_date,1,4) AS year, COUNT(*) AS n, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok_n, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_repro FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY year ORDER BY year",
-        "queryText": "SELECT SUBSTR(commit_date,1,4) AS year, COUNT(*) AS n, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok_n, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_repro FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY year ORDER BY year",
-        "timeColumns": []
-      }],
-      "fieldConfig": {"defaults": {}, "overrides": [{"matcher": {"id": "byName", "options": "pct_repro"}, "properties": [{"id": "unit", "value": "percent"}, {"id": "custom.cellOptions", "value": {"type": "color-background", "mode": "gradient"}}, {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 40}, {"color": "green", "value": 55}]}}]}]},
-      "options": {"showHeader": true}
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT SUBSTR(commit_date,1,4) AS year, COUNT(*) AS n, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok_n, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_repro FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY year ORDER BY year",
+          "queryText": "SELECT SUBSTR(commit_date,1,4) AS year, COUNT(*) AS n, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok_n, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_repro FROM drive_state WHERE run_id='$run_id' AND commit_date IS NOT NULL GROUP BY year ORDER BY year",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pct_repro"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 40
+                    },
+                    {
+                      "color": "green",
+                      "value": 55
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 400,
-      "title": "RQ4 — Failure-mode taxonomy",
+      "title": "RQ4 \u2014 Failure-mode taxonomy",
       "type": "barchart",
-      "gridPos": {"h": 11, "w": 24, "x": 0, "y": 61},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT category, COUNT(*) AS count FROM drive_state_classifications WHERE run_id='$run_id' GROUP BY category ORDER BY count DESC",
-        "queryText": "SELECT category, COUNT(*) AS count FROM drive_state_classifications WHERE run_id='$run_id' GROUP BY category ORDER BY count DESC",
-        "timeColumns": []
-      }],
-      "options": {"orientation": "horizontal", "showValue": "always", "stacking": "none"}
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 71
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT category, COUNT(*) AS count FROM drive_state_classifications WHERE run_id='$run_id' GROUP BY category ORDER BY count DESC",
+          "queryText": "SELECT category, COUNT(*) AS count FROM drive_state_classifications WHERE run_id='$run_id' GROUP BY category ORDER BY count DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none"
+      }
     },
     {
       "id": 410,
-      "title": "RQ4 — RUSTC_BITROT top E-codes",
+      "title": "RQ4 \u2014 RUSTC_BITROT top E-codes",
       "type": "barchart",
-      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 72},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT COALESCE(subcategory, '(no E-code)') AS code, COUNT(*) AS count FROM drive_state_classifications WHERE run_id='$run_id' AND category='RUSTC_BITROT' GROUP BY subcategory ORDER BY count DESC LIMIT 15",
-        "queryText": "SELECT COALESCE(subcategory, '(no E-code)') AS code, COUNT(*) AS count FROM drive_state_classifications WHERE run_id='$run_id' AND category='RUSTC_BITROT' GROUP BY subcategory ORDER BY count DESC LIMIT 15",
-        "timeColumns": []
-      }],
-      "options": {"orientation": "horizontal", "showValue": "always"}
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 82
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT COALESCE(subcategory, '(no E-code)') AS code, COUNT(*) AS count FROM drive_state_classifications WHERE run_id='$run_id' AND category='RUSTC_BITROT' GROUP BY subcategory ORDER BY count DESC LIMIT 15",
+          "queryText": "SELECT COALESCE(subcategory, '(no E-code)') AS code, COUNT(*) AS count FROM drive_state_classifications WHERE run_id='$run_id' AND category='RUSTC_BITROT' GROUP BY subcategory ORDER BY count DESC LIMIT 15",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      }
     },
     {
       "id": 411,
-      "title": "RQ4 — Pipeline-fixable vs corpus-property",
+      "title": "RQ4 \u2014 Pipeline-fixable vs corpus-property",
       "type": "piechart",
-      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 72},
-      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
-      "targets": [{
-        "refId": "A",
-        "queryType": "table",
-        "rawQueryText": "SELECT CASE WHEN category IN ('NIGHTLY_REQUIRED','REPO_GONE','TIMEOUT','RUNTIME_CRASH','TEST_FAILURE','MSRV_TOO_LOW') THEN 'corpus property' WHEN category IN ('NATIVE_DEP_MISSING','LOCK_FILE_STALE','OPENSSL_MISMATCH','DEPENDENCY_RESOLUTION') THEN 'pipeline-fixable' WHEN category='RUSTC_BITROT' THEN 'mixed (era-routing)' ELSE 'other' END AS metric, COUNT(*) AS n FROM drive_state_classifications WHERE run_id='$run_id' GROUP BY metric ORDER BY n DESC",
-        "queryText": "SELECT CASE WHEN category IN ('NIGHTLY_REQUIRED','REPO_GONE','TIMEOUT','RUNTIME_CRASH','TEST_FAILURE','MSRV_TOO_LOW') THEN 'corpus property' WHEN category IN ('NATIVE_DEP_MISSING','LOCK_FILE_STALE','OPENSSL_MISMATCH','DEPENDENCY_RESOLUTION') THEN 'pipeline-fixable' WHEN category='RUSTC_BITROT' THEN 'mixed (era-routing)' ELSE 'other' END AS metric, COUNT(*) AS n FROM drive_state_classifications WHERE run_id='$run_id' GROUP BY metric ORDER BY n DESC",
-        "timeColumns": []
-      }],
-      "options": {"pieType": "donut", "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}, "displayLabels": ["percent"]}
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 82
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT CASE WHEN category IN ('NIGHTLY_REQUIRED','REPO_GONE','TIMEOUT','RUNTIME_CRASH','TEST_FAILURE','MSRV_TOO_LOW') THEN 'corpus property' WHEN category IN ('NATIVE_DEP_MISSING','LOCK_FILE_STALE','OPENSSL_MISMATCH','DEPENDENCY_RESOLUTION') THEN 'pipeline-fixable' WHEN category='RUSTC_BITROT' THEN 'mixed (era-routing)' ELSE 'other' END AS metric, COUNT(*) AS n FROM drive_state_classifications WHERE run_id='$run_id' GROUP BY metric ORDER BY n DESC",
+          "queryText": "SELECT CASE WHEN category IN ('NIGHTLY_REQUIRED','REPO_GONE','TIMEOUT','RUNTIME_CRASH','TEST_FAILURE','MSRV_TOO_LOW') THEN 'corpus property' WHEN category IN ('NATIVE_DEP_MISSING','LOCK_FILE_STALE','OPENSSL_MISMATCH','DEPENDENCY_RESOLUTION') THEN 'pipeline-fixable' WHEN category='RUSTC_BITROT' THEN 'mixed (era-routing)' ELSE 'other' END AS metric, COUNT(*) AS n FROM drive_state_classifications WHERE run_id='$run_id' GROUP BY metric ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
     }
   ]
 }
