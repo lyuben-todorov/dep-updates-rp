@@ -787,6 +787,21 @@
       }
     },
     {
+      "id": 409,
+      "title": "RQ4 — Rustc E-code reference",
+      "type": "text",
+      "gridPos": {
+        "h": 13,
+        "w": 24,
+        "x": 0,
+        "y": 90
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Short descriptions of the rustc error codes that surface in the RUSTC_BITROT panels below. Counts in parentheses are merged-run occurrences (per-occurrence view). For full canonical text, run `rustc --explain E0277` etc. on the toolchain matching the candidate's image.\n\n| Code | Meaning | Why it shows up in bitrot |\n|---|---|---|\n| **E0277** (1074) | Trait bound `T: SomeTrait` not satisfied | A required trait impl is missing or a bound got tightened. **Dominant in serde-driven breakage** — `#[derive(Serialize/Deserialize)]` expands per field, so one struct = many E0277s in the log. |\n| **E0308** (1068) | Mismatched types — expected X, found Y | Type checker can't unify two types. Triggered when a dep changed an associated-type signature, or when stricter inference no longer auto-coerces (e.g. `&str` vs `String`). Also serde-heavy (`Visitor::Value`, `Deserializer::Error` signatures). |\n| **E0520** (178) | Non-default impl already supplied (specialization) | Tried to override a parent impl that wasn't marked `default`. Almost always nightly-feature `specialization` related; a stdlib or upstream crate added/changed a non-default impl. |\n| **E0034** (151) | Multiple applicable items in scope | Ambiguous method call — two traits provide a method with the same name. Triggered when stdlib added an inherent method or trait method that clashed with a third-party one (`Iterator::flatten`, `Option::contains`, etc.). |\n| **E0425** (110) | Cannot find value/function/macro in this scope | Unresolved name. A path was renamed, removed, or moved between modules in a dep. Std-lib path churn shows up here. |\n| **E0119** (102) | Conflicting trait implementations | Two impls overlap. Often a `From<T> for U` blanket impl was added in stdlib/dep that conflicts with a user impl. Coherence rules tightened repeatedly 2017–2019. |\n| **E0433** (71) | Failed to resolve — use of undeclared crate/module | Like E0425 but at the path-segment level (`foo::Bar` where `foo` itself can't be found). |\n| **E0599** (61) | No method named `X` found for type `T` | Method went away (renamed/removed in dep), or a trait that provided it is no longer in scope. Often pairs with E0061 (wrong-arity). |\n| **E0283** (60) | Type annotations needed (multiple impls) | Inference can't pick which trait impl to use; needs `::<>` turbofish. Triggered when a dep adds a second blanket impl that disambiguation now requires. |\n| **E0405** (58) | Cannot find trait `T` in this scope | Trait was renamed or moved (e.g. `std::ascii::AsciiExt` deprecated). |\n| **E0601** (35) | `main` function not found | Project-shape issue — usually a `[[bin]]` target whose source file moved, or `src/main.rs` referenced but absent. Less rustc-bitrot, more pipeline/manifest. |\n| **E0412** (29) | Cannot find type `T` in this scope | Type was renamed/removed/moved. Std-lib type churn. |"
+      }
+    },
+    {
       "id": 410,
       "title": "RQ4 — RUSTC_BITROT top E-codes (per candidate · dominant code)",
       "type": "barchart",
@@ -794,7 +809,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 90
+        "y": 103
       },
       "datasource": {
         "type": "frser-sqlite-datasource",
@@ -822,7 +837,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 90
+        "y": 103
       },
       "datasource": {
         "type": "frser-sqlite-datasource",
@@ -850,7 +865,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 99
+        "y": 112
       },
       "datasource": {
         "type": "frser-sqlite-datasource",
