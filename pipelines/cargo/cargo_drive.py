@@ -139,6 +139,12 @@ class DriveRecord:
     failure_category: str | None = None
     failure_subcategory: str | None = None
     failure_evidence: str | None = None
+    # Full distribution of rustc E-codes seen in the pre-log (canonical
+    # source: cargo's JSON compiler-message stream). For RUSTC_BITROT
+    # candidates this captures the 17×E0308 + 10×E0277 -style multi-code
+    # picture that subcategory (one code) flattens. Empty dict when no
+    # rustc errors are present (most non-RUSTC failure modes).
+    failure_error_code_counts: dict | None = None
     # Multi-attempt flakiness annotations. Set when attempts > 1 and the
     # repeated cargo-test invocations disagreed.
     flaky_pre: bool = False
@@ -274,6 +280,7 @@ def _mirror_drive_state(db: PipelineDB, run_id: str, rec: DriveRecord) -> None:
             category=rec.failure_category,
             subcategory=rec.failure_subcategory,
             evidence=rec.failure_evidence,
+            error_code_counts=rec.failure_error_code_counts,
             classified_at=rec.timestamp or None,
         )
 
@@ -618,6 +625,7 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
         from_reason = _failure_classifier.classify_from_reason(rec.reason)
         if from_reason is not None:
             cat, sub, ev = from_reason
+            ecc: dict[str, int] = {}
         else:
             try:
                 pre_text = Path(repro.pre_log_path).read_text(errors="replace")
@@ -625,11 +633,13 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
                 pre_text = ""
             if not pre_text:
                 cat, sub, ev = "NO_LOG", None, "no error line in pre-log"
+                ecc = {}
             else:
-                cat, sub, ev = _failure_classifier.classify(pre_text)
+                cat, sub, ev, ecc = _failure_classifier.classify_full(pre_text)
         rec.failure_category = cat
         rec.failure_subcategory = sub
         rec.failure_evidence = ev
+        rec.failure_error_code_counts = ecc or None
 
         # --relax-locked retry path. When LOCK_FILE_STALE is the failure
         # cause, retry once with `cargo generate-lockfile && cargo test
@@ -651,6 +661,7 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
                 rec.failure_category = None
                 rec.failure_subcategory = None
                 rec.failure_evidence = None
+                rec.failure_error_code_counts = None
                 # The relock'd repro becomes the entry-assembly source.
                 repro = relock
                 # Fall through to the breaking/non-breaking decision below.
@@ -850,6 +861,7 @@ def _reclassify_mode(args) -> int:
 
     counts: dict[str, int] = {}
     for candidate_key, status, reason in rows:
+        ecc: dict[str, int] = {}
         from_reason = _failure_classifier.classify_from_reason(reason)
         if from_reason is not None:
             cat, sub, ev = from_reason
@@ -866,13 +878,14 @@ def _reclassify_mode(args) -> int:
                     if not text:
                         cat, sub, ev = "NO_LOG", None, f"empty {pre_log.name}"
                     else:
-                        cat, sub, ev = _failure_classifier.classify(text)
+                        cat, sub, ev, ecc = _failure_classifier.classify_full(text)
         db.upsert_drive_state_classification(
             run_id=args.run_id,
             candidate_key=candidate_key,
             category=cat,
             subcategory=sub,
             evidence=ev,
+            error_code_counts=ecc or None,
         )
         counts[cat] = counts.get(cat, 0) + 1
 

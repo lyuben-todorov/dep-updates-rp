@@ -206,12 +206,18 @@ CREATE INDEX IF NOT EXISTS idx_drive_status ON drive_state(status);
 -- reclassify` over an existing run's logs. Earlier deployments populated
 -- this via scripts/reclassify_failures.py; that script is now a shim.
 CREATE TABLE IF NOT EXISTS drive_state_classifications (
-  run_id        TEXT NOT NULL,
-  candidate_key TEXT NOT NULL,
-  category      TEXT NOT NULL,
-  subcategory   TEXT,
-  evidence      TEXT,
-  classified_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  run_id             TEXT NOT NULL,
+  candidate_key      TEXT NOT NULL,
+  category           TEXT NOT NULL,
+  subcategory        TEXT,
+  evidence           TEXT,
+  -- JSON dict {E_code: count} of every rustc error code seen in the
+  -- pre-log. Canonical source: cargo's JSON `compiler-message` records.
+  -- Subcategory is the most-fired code for RUSTC_BITROT — but the
+  -- distribution often matters (e.g. `lexical-core` emits 17×E0308 +
+  -- 10×E0277 in one cargo invocation; picking just one loses signal).
+  error_code_counts  TEXT,
+  classified_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (run_id, candidate_key),
   FOREIGN KEY (run_id) REFERENCES runs(run_id)
 );
@@ -792,19 +798,28 @@ class PipelineDB:
         category: str,
         subcategory: str | None = None,
         evidence: str | None = None,
+        error_code_counts: dict[str, int] | None = None,
         classified_at: str | None = None,
     ) -> None:
         """Write a Scheme-2 classification row. Idempotent — overwrites on
         conflict so re-classifying with newer rules updates the record in
-        place."""
+        place. `error_code_counts` is a `{E_code: count}` dict; serialised
+        as JSON. Empty dict and None both store NULL (no signal vs no data
+        is indistinguishable in practice for this column)."""
+        ecc_json = (
+            json.dumps(error_code_counts, sort_keys=True)
+            if error_code_counts else None
+        )
         self.conn.execute(
             """INSERT INTO drive_state_classifications
-                 (run_id, candidate_key, category, subcategory, evidence, classified_at)
-               VALUES (?, ?, ?, ?, ?, ?)
+                 (run_id, candidate_key, category, subcategory, evidence,
+                  error_code_counts, classified_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id, candidate_key) DO UPDATE SET
                  category=excluded.category,
                  subcategory=excluded.subcategory,
                  evidence=excluded.evidence,
+                 error_code_counts=excluded.error_code_counts,
                  classified_at=excluded.classified_at
             """,
             (
@@ -813,6 +828,7 @@ class PipelineDB:
                 category,
                 subcategory,
                 evidence,
+                ecc_json,
                 classified_at or _utcnow_iso(),
             ),
         )

@@ -51,6 +51,14 @@ import re
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 RUSTC_CODE = re.compile(r"error\[(E\d{4})\]")
+# Validates a code string (without surrounding `error[...]`) — used when
+# counting E-codes pulled from cargo's JSON `compiler-message.code.code`.
+RUSTC_CODE_HEAD = re.compile(r"^E\d{4}$")
+# Matches the *header* of a rustc error line: `error[E####]:` followed by
+# a message. Excludes prose mentions like `try rustc --explain E0308` or
+# the explanation block quoting the code in narrative form. Anchored to
+# line start (multiline mode) so each header is counted once per line.
+RUSTC_CODE_HEADER_LINE = re.compile(r"^error\[(E\d{4})\]:", re.MULTILINE)
 # Linker errors hide in cargo's JSON `compiler-message` records, not as
 # top-level `error: …` lines. The round-2 audit found 35 candidates
 # mis-classed as RUSTC_BITROT whose actual cause was `cannot find -lSDL2`
@@ -101,6 +109,48 @@ CATEGORIES = (
     "NO_LOG",
     "OTHER",
 )
+
+
+def count_rustc_error_codes(text: str) -> dict[str, int]:
+    """Tally `error[E####]` occurrences in the log.
+
+    Source of truth: cargo's JSON `compiler-message` records — each
+    level=error message has a `code.code` field (e.g. "E0308"). Counting
+    those is canonical and dedup-safe (every error is one record).
+
+    Fallback: when JSON records are absent (older cargo, malformed
+    stream), scan the human-readable `error[E####]:` line *headers*
+    only. We exclude prose mentions of E-codes (e.g. `try rustc --explain
+    E0308` or the explanation block that quotes the code). The header
+    pattern requires a colon-or-newline after the bracket so we don't
+    double-count the explainer text.
+    """
+    counts: dict[str, int] = {}
+    json_seen = False
+    for line in text.splitlines():
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if obj.get("reason") != "compiler-message":
+            continue
+        msg = obj.get("message") or {}
+        if msg.get("level") != "error":
+            continue
+        code = (msg.get("code") or {}).get("code")
+        if not code or not RUSTC_CODE_HEAD.match(code):
+            continue
+        counts[code] = counts.get(code, 0) + 1
+        json_seen = True
+    if json_seen:
+        return counts
+    # Text fallback: only count `error[E####]:` headers, not prose mentions.
+    for m in RUSTC_CODE_HEADER_LINE.finditer(text):
+        code = m.group(1)
+        counts[code] = counts.get(code, 0) + 1
+    return counts
 
 # "error: build failed" is always the last line; it's a summary, not a cause.
 # Same with "could not compile ... due to N previous errors" when N>0.
@@ -179,7 +229,38 @@ def extract_terminal_error(clean: str) -> str | None:
 
 
 def classify(text: str) -> tuple[str, str | None, str]:
-    """Return (category, subcategory, evidence_snippet).
+    """Return (category, subcategory, evidence_snippet). Backwards-compat
+    wrapper around `classify_full` for callers that don't need the
+    error-code counts.
+    """
+    cat, sub, ev, _ = classify_full(text)
+    return cat, sub, ev
+
+
+def classify_full(text: str) -> tuple[str, str | None, str, dict[str, int]]:
+    """Return (category, subcategory, evidence_snippet, error_code_counts).
+
+    `error_code_counts` is a `{E_code: count}` dict for every E-code seen
+    in the log (canonical source: cargo's JSON `compiler-message`
+    records). Always populated when the log contains rustc errors;
+    typically empty for non-rustc failure modes (REPO_GONE, NETWORK_ERROR,
+    etc.). Stored in `drive_state_classifications.error_code_counts`
+    as JSON; lets analysts see the full E-code distribution per
+    candidate (e.g. `lexical-core` failures emit 17×E0308 + 10×E0277,
+    not just the single picked subcategory).
+
+    For RUSTC_BITROT, subcategory is the *most-fired* E-code (ties
+    broken alphabetically). When that's also a NIGHTLY_E_CODE the
+    candidate gets re-routed to NIGHTLY_REQUIRED.
+    """
+    code_counts = count_rustc_error_codes(text)
+    cat, sub, ev = _classify_inner(text, code_counts)
+    return cat, sub, ev, code_counts
+
+
+def _classify_inner(text: str, code_counts: dict[str, int]) -> tuple[str, str | None, str]:
+    """Body of the classifier. Pulled out so `classify_full` can compute
+    the E-code counts once and pass them down without re-walking the log.
 
     Prioritises the *terminal* error (the last non-generic `error:` line)
     over opportunistic keyword matches across the whole log. Many DS1
@@ -275,18 +356,25 @@ def classify(text: str) -> tuple[str, str | None, str]:
                  or "custom build command" in term_low):
         return "RUNTIME_CRASH", "BUILD_SCRIPT_PANIC", terminal[:120]
 
-    # rustc error code — the bitrot workhorse. Check the terminal line first,
-    # otherwise any error[E####] anywhere in the log.
-    m = RUSTC_CODE.search(terminal) or RUSTC_CODE.search(clean)
-    if m:
-        code = m.group(1)
+    # rustc error code — the bitrot workhorse. Pick the *most-fired*
+    # E-code from `code_counts` as the subcategory; ties broken
+    # alphabetically. Previously took the first regex match anywhere in
+    # the log, which was effectively arbitrary when multiple distinct
+    # codes coexisted (lexical-core 0.7.x emits 17×E0308 + 10×E0277, but
+    # whichever the regex hit first won — usually defensible, sometimes
+    # wrong, never principled). The full distribution is recorded in the
+    # `error_code_counts` field that the caller writes to the DB.
+    if code_counts:
+        # Most-fired wins. Sort by (-count, code) so ties → smallest code.
+        code = sorted(code_counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
         # E0554 (`#![feature]` on stable) and E0658 (use of unstable lib
         # feature) fire on every stable rustc, regardless of milestone.
         # Re-routing to an older fat image won't recover these; they
         # belong with NIGHTLY_REQUIRED.
         if code in NIGHTLY_E_CODES:
             return "NIGHTLY_REQUIRED", code, f"error[{code}] — needs nightly"
-        return "RUSTC_BITROT", code, f"error[{code}]"
+        ev = f"error[{code}] (×{code_counts[code]}, of {sum(code_counts.values())} rustc errors)"
+        return "RUSTC_BITROT", code, ev
 
     # Test failures (pre-commit test expected to pass, didn't). Before
     # accepting the generic TEST_FAILURE bucket, check whether the
