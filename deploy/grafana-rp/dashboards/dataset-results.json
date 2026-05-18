@@ -1,0 +1,904 @@
+{
+  "title": "Dataset Results",
+  "uid": "dataset-results",
+  "tags": [
+    "rp2026",
+    "thesis",
+    "rq",
+    "merged"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "run_id",
+        "label": "Runs (merged)",
+        "type": "query",
+        "datasource": {
+          "type": "frser-sqlite-datasource",
+          "uid": "pipeline-sqlite"
+        },
+        "query": "SELECT DISTINCT run_id FROM drive_state ORDER BY run_id DESC",
+        "current": {
+          "text": [
+            "ds1-full-crack-r2",
+            "ds1-full-crack-r2-openssl-stretch"
+          ],
+          "value": [
+            "ds1-full-crack-r2",
+            "ds1-full-crack-r2-openssl-stretch"
+          ]
+        },
+        "includeAll": false,
+        "multi": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Merged dataset view: $run_id",
+      "type": "text",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Merged-run view.** When multiple runs are selected, each candidate appears once: its row from the run with the best status wins (priority: `ok` > `ok_after_relock` > `flaky` > `not_reproducible`). Classifications join on the winning run's `run_id`.\n\n**RQ1** Reproducibility rate · **RQ2** Breaking rate · **RQ3** Temporal variation · **RQ4** Failure-mode taxonomy."
+      }
+    },
+    {
+      "id": 100,
+      "title": "RQ1 — Reproducibility rate (merged)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 3
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS value FROM ranked WHERE rn = 1",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS value FROM ranked WHERE rn = 1",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 40
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 60
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 101,
+      "title": "Cohort size (deduped)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 3
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT COUNT(DISTINCT candidate_key) AS value FROM drive_state WHERE run_id IN (${run_id:singlequote})",
+          "queryText": "SELECT COUNT(DISTINCT candidate_key) AS value FROM drive_state WHERE run_id IN (${run_id:singlequote})",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 102,
+      "title": "Reproducible (incl. ok_after_relock)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 3
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS value FROM ranked WHERE rn = 1",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS value FROM ranked WHERE rn = 1",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 110,
+      "title": "RQ1 — Outcome distribution (merged)",
+      "type": "piechart",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT status, COUNT(*) AS n FROM ranked WHERE rn = 1 GROUP BY status ORDER BY n DESC",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT status, COUNT(*) AS n FROM ranked WHERE rn = 1 GROUP BY status ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 111,
+      "title": "RQ1 — Outcome counts",
+      "type": "table",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})), winning AS (SELECT * FROM ranked WHERE rn = 1) SELECT status, COUNT(*) AS n, ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM winning), 1) AS pct FROM winning GROUP BY status ORDER BY n DESC",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})), winning AS (SELECT * FROM ranked WHERE rn = 1) SELECT status, COUNT(*) AS n, ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM winning), 1) AS pct FROM winning GROUP BY status ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pct"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 112,
+      "title": "RQ1 — Per-run contribution to merged set",
+      "type": "table",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT run_id AS winning_run, COUNT(*) AS candidates, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS reproducible FROM ranked WHERE rn = 1 GROUP BY run_id ORDER BY candidates DESC",
+          "queryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT run_id AS winning_run, COUNT(*) AS candidates, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS reproducible FROM ranked WHERE rn = 1 GROUP BY run_id ORDER BY candidates DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 200,
+      "title": "RQ2 — Breaking vs non-breaking (over reproducible cohort)",
+      "type": "piechart",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.category AS metric, COUNT(*) AS n FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') GROUP BY e.category ORDER BY n DESC",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.category AS metric, COUNT(*) AS n FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') GROUP BY e.category ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 201,
+      "title": "RQ2 — Patch bumps: breaking vs non-breaking",
+      "type": "piechart",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 34
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.category AS metric, COUNT(*) AS n FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='patch' GROUP BY e.category ORDER BY n DESC",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.category AS metric, COUNT(*) AS n FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='patch' GROUP BY e.category ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 202,
+      "title": "RQ2 — Minor bumps: breaking vs non-breaking",
+      "type": "piechart",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 34
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.category AS metric, COUNT(*) AS n FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='minor' GROUP BY e.category ORDER BY n DESC",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.category AS metric, COUNT(*) AS n FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='minor' GROUP BY e.category ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 203,
+      "title": "RQ2 — Major bumps: breaking vs non-breaking",
+      "type": "piechart",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 34
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.category AS metric, COUNT(*) AS n FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='major' GROUP BY e.category ORDER BY n DESC",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.category AS metric, COUNT(*) AS n FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') AND e.version_update_type='major' GROUP BY e.category ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 210,
+      "title": "RQ2 — Top breaking deps (≥2 PRs)",
+      "type": "table",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.dep_name AS dependency, COUNT(*) AS breaking_prs, GROUP_CONCAT(DISTINCT e.previous_version || '→' || e.new_version) AS sample_bumps FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') AND e.category='breaking' GROUP BY e.dep_name HAVING breaking_prs >= 2 ORDER BY breaking_prs DESC LIMIT 25",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, entry_path, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT e.dep_name AS dependency, COUNT(*) AS breaking_prs, GROUP_CONCAT(DISTINCT e.previous_version || '→' || e.new_version) AS sample_bumps FROM ranked d JOIN entries e ON e.id = REPLACE(REPLACE(d.entry_path,'data/cargo/',''),'.json','') WHERE d.rn = 1 AND d.status IN ('ok','ok_after_relock') AND e.category='breaking' GROUP BY e.dep_name HAVING breaking_prs >= 2 ORDER BY breaking_prs DESC LIMIT 25",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 300,
+      "title": "RQ3 — Reproducibility rate over time (monthly, merged)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, commit_date, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS reproducibility_pct FROM ranked WHERE rn = 1 AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, commit_date, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS reproducibility_pct FROM ranked WHERE rn = 1 AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 5,
+            "showPoints": "always",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 301,
+      "title": "RQ3 — Cohort size over time (monthly)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 63
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, commit_date, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, COUNT(*) AS candidates FROM ranked WHERE rn = 1 AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "queryText": "WITH ranked AS (SELECT candidate_key, commit_date, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, COUNT(*) AS candidates FROM ranked WHERE rn = 1 AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "lineWidth": 1
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 302,
+      "title": "RQ3 — ok / not_reproducible split over time",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 63
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "time series",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, commit_date, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN status='not_reproducible' THEN 1 ELSE 0 END) AS not_reproducible FROM ranked WHERE rn = 1 AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, commit_date, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT strftime('%s', SUBSTR(commit_date,1,7) || '-01') AS time, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN status='not_reproducible' THEN 1 ELSE 0 END) AS not_reproducible FROM ranked WHERE rn = 1 AND commit_date IS NOT NULL GROUP BY SUBSTR(commit_date,1,7) ORDER BY time",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "stacking": {
+              "mode": "normal"
+            },
+            "fillOpacity": 80,
+            "lineWidth": 1
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ok"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "not_reproducible"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 303,
+      "title": "RQ3 — Yearly summary (merged)",
+      "type": "table",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 72
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT candidate_key, status, commit_date, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT SUBSTR(commit_date,1,4) AS year, COUNT(*) AS n, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok_n, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_repro FROM ranked WHERE rn = 1 AND commit_date IS NOT NULL GROUP BY year ORDER BY year",
+          "queryText": "WITH ranked AS (SELECT candidate_key, status, commit_date, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT SUBSTR(commit_date,1,4) AS year, COUNT(*) AS n, SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) AS ok_n, ROUND(100.0 * SUM(CASE WHEN status IN ('ok','ok_after_relock') THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_repro FROM ranked WHERE rn = 1 AND commit_date IS NOT NULL GROUP BY year ORDER BY year",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pct_repro"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 40
+                    },
+                    {
+                      "color": "green",
+                      "value": 55
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 400,
+      "title": "RQ4 — Failure-mode taxonomy (merged, classifications from winning run)",
+      "type": "barchart",
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 79
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT c.category, COUNT(*) AS count FROM ranked r JOIN drive_state_classifications c ON c.run_id = r.run_id AND c.candidate_key = r.candidate_key WHERE r.rn = 1 AND r.status = 'not_reproducible' GROUP BY c.category ORDER BY count DESC",
+          "queryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT c.category, COUNT(*) AS count FROM ranked r JOIN drive_state_classifications c ON c.run_id = r.run_id AND c.candidate_key = r.candidate_key WHERE r.rn = 1 AND r.status = 'not_reproducible' GROUP BY c.category ORDER BY count DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none"
+      }
+    },
+    {
+      "id": 409,
+      "title": "RQ4 — Rustc E-code reference",
+      "type": "text",
+      "gridPos": {
+        "h": 13,
+        "w": 24,
+        "x": 0,
+        "y": 90
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Short descriptions of the rustc error codes that surface in the RUSTC_BITROT panels below. Counts in parentheses are merged-run occurrences (per-occurrence view). For full canonical text, run `rustc --explain E0277` etc. on the toolchain matching the candidate's image.\n\n| Code | Meaning | Why it shows up in bitrot |\n|---|---|---|\n| **E0277** (1074) | Trait bound `T: SomeTrait` not satisfied | A required trait impl is missing or a bound got tightened. **Dominant in serde-driven breakage** — `#[derive(Serialize/Deserialize)]` expands per field, so one struct = many E0277s in the log. |\n| **E0308** (1068) | Mismatched types — expected X, found Y | Type checker can't unify two types. Triggered when a dep changed an associated-type signature, or when stricter inference no longer auto-coerces (e.g. `&str` vs `String`). Also serde-heavy (`Visitor::Value`, `Deserializer::Error` signatures). |\n| **E0520** (178) | Non-default impl already supplied (specialization) | Tried to override a parent impl that wasn't marked `default`. Almost always nightly-feature `specialization` related; a stdlib or upstream crate added/changed a non-default impl. |\n| **E0034** (151) | Multiple applicable items in scope | Ambiguous method call — two traits provide a method with the same name. Triggered when stdlib added an inherent method or trait method that clashed with a third-party one (`Iterator::flatten`, `Option::contains`, etc.). |\n| **E0425** (110) | Cannot find value/function/macro in this scope | Unresolved name. A path was renamed, removed, or moved between modules in a dep. Std-lib path churn shows up here. |\n| **E0119** (102) | Conflicting trait implementations | Two impls overlap. Often a `From<T> for U` blanket impl was added in stdlib/dep that conflicts with a user impl. Coherence rules tightened repeatedly 2017–2019. |\n| **E0433** (71) | Failed to resolve — use of undeclared crate/module | Like E0425 but at the path-segment level (`foo::Bar` where `foo` itself can't be found). |\n| **E0599** (61) | No method named `X` found for type `T` | Method went away (renamed/removed in dep), or a trait that provided it is no longer in scope. Often pairs with E0061 (wrong-arity). |\n| **E0283** (60) | Type annotations needed (multiple impls) | Inference can't pick which trait impl to use; needs `::<>` turbofish. Triggered when a dep adds a second blanket impl that disambiguation now requires. |\n| **E0405** (58) | Cannot find trait `T` in this scope | Trait was renamed or moved (e.g. `std::ascii::AsciiExt` deprecated). |\n| **E0601** (35) | `main` function not found | Project-shape issue — usually a `[[bin]]` target whose source file moved, or `src/main.rs` referenced but absent. Less rustc-bitrot, more pipeline/manifest. |\n| **E0412** (29) | Cannot find type `T` in this scope | Type was renamed/removed/moved. Std-lib type churn. |"
+      }
+    },
+    {
+      "id": 410,
+      "title": "RQ4 — RUSTC_BITROT top E-codes (per candidate · dominant code)",
+      "type": "barchart",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 103
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT COALESCE(c.subcategory, '(no E-code)') AS code, COUNT(*) AS count FROM ranked r JOIN drive_state_classifications c ON c.run_id = r.run_id AND c.candidate_key = r.candidate_key WHERE r.rn = 1 AND r.status = 'not_reproducible' AND c.category = 'RUSTC_BITROT' GROUP BY c.subcategory ORDER BY count DESC LIMIT 15",
+          "queryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT COALESCE(c.subcategory, '(no E-code)') AS code, COUNT(*) AS count FROM ranked r JOIN drive_state_classifications c ON c.run_id = r.run_id AND c.candidate_key = r.candidate_key WHERE r.rn = 1 AND r.status = 'not_reproducible' AND c.category = 'RUSTC_BITROT' GROUP BY c.subcategory ORDER BY count DESC LIMIT 15",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      }
+    },
+    {
+      "id": 412,
+      "title": "RQ4 — RUSTC_BITROT top E-codes (per occurrence · full distribution)",
+      "type": "barchart",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 103
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT je.key AS code, SUM(CAST(je.value AS INTEGER)) AS occurrences FROM ranked r JOIN drive_state_classifications c ON c.run_id = r.run_id AND c.candidate_key = r.candidate_key, json_each(c.error_code_counts) je WHERE r.rn = 1 AND r.status = 'not_reproducible' AND c.category = 'RUSTC_BITROT' AND c.error_code_counts IS NOT NULL AND c.error_code_counts != '' GROUP BY code ORDER BY occurrences DESC LIMIT 15",
+          "queryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT je.key AS code, SUM(CAST(je.value AS INTEGER)) AS occurrences FROM ranked r JOIN drive_state_classifications c ON c.run_id = r.run_id AND c.candidate_key = r.candidate_key, json_each(c.error_code_counts) je WHERE r.rn = 1 AND r.status = 'not_reproducible' AND c.category = 'RUSTC_BITROT' AND c.error_code_counts IS NOT NULL AND c.error_code_counts != '' GROUP BY code ORDER BY occurrences DESC LIMIT 15",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      }
+    },
+    {
+      "id": 411,
+      "title": "RQ4 — Pipeline-fixable vs corpus-property",
+      "type": "piechart",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 112
+      },
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "pipeline-sqlite"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT CASE WHEN c.category IN ('NIGHTLY_REQUIRED','REPO_GONE','TIMEOUT','RUNTIME_CRASH','TEST_FAILURE','MSRV_TOO_LOW') THEN 'corpus property' WHEN c.category IN ('NATIVE_DEP_MISSING','LOCK_FILE_STALE','OPENSSL_MISMATCH','DEPENDENCY_RESOLUTION') THEN 'pipeline-fixable' WHEN c.category='RUSTC_BITROT' THEN 'mixed (era-routing)' ELSE 'other' END AS metric, COUNT(*) AS n FROM ranked r JOIN drive_state_classifications c ON c.run_id = r.run_id AND c.candidate_key = r.candidate_key WHERE r.rn = 1 AND r.status = 'not_reproducible' GROUP BY metric ORDER BY n DESC",
+          "queryText": "WITH ranked AS (SELECT run_id, candidate_key, status, ROW_NUMBER() OVER (PARTITION BY candidate_key ORDER BY CASE status WHEN 'ok' THEN 0 WHEN 'ok_after_relock' THEN 1 WHEN 'flaky' THEN 2 WHEN 'not_reproducible' THEN 3 ELSE 4 END, run_id) AS rn FROM drive_state WHERE run_id IN (${run_id:singlequote})) SELECT CASE WHEN c.category IN ('NIGHTLY_REQUIRED','REPO_GONE','TIMEOUT','RUNTIME_CRASH','TEST_FAILURE','MSRV_TOO_LOW') THEN 'corpus property' WHEN c.category IN ('NATIVE_DEP_MISSING','LOCK_FILE_STALE','OPENSSL_MISMATCH','DEPENDENCY_RESOLUTION') THEN 'pipeline-fixable' WHEN c.category='RUSTC_BITROT' THEN 'mixed (era-routing)' ELSE 'other' END AS metric, COUNT(*) AS n FROM ranked r JOIN drive_state_classifications c ON c.run_id = r.run_id AND c.candidate_key = r.candidate_key WHERE r.rn = 1 AND r.status = 'not_reproducible' GROUP BY metric ORDER BY n DESC",
+          "timeColumns": []
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        }
+      }
+    }
+  ]
+}

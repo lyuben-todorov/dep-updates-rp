@@ -38,6 +38,18 @@ from pathlib import Path
 # libra/diem builds on 2026-05-09.
 _active_containers: set[str] = set()
 _active_containers_lock = threading.Lock()
+# Set by `request_shutdown()` (via the driver's signal handler). Once set,
+# every subsequent `_run_in_docker` invocation returns 137 (SIGKILL exit
+# code) without spawning a container. Necessary because a single
+# reproduce() runs pre + post commits sequentially: when SIGTERM lands
+# during pre, the kill_active_containers() snapshot only sees the pre
+# container, but post() would otherwise spawn a fresh one and leak.
+_shutdown_requested = threading.Event()
+
+
+def request_shutdown() -> None:
+    """Mark the reproducer as shutting down. Idempotent."""
+    _shutdown_requested.set()
 
 
 def _register_container(name: str) -> None:
@@ -53,8 +65,10 @@ def _unregister_container(name: str) -> None:
 def kill_active_containers(timeout_per_kill_s: int = 10) -> int:
     """Best-effort `docker kill` on every currently-tracked container.
     Called from the driver's signal handler. Returns the number of kills
-    attempted. Idempotent — safe to call multiple times.
+    attempted. Idempotent — safe to call multiple times. Sets the
+    shutdown flag so subsequent docker runs are skipped.
     """
+    request_shutdown()
     with _active_containers_lock:
         names = list(_active_containers)
     for n in names:
@@ -89,6 +103,23 @@ DEB_THIN_DEPS = "apt-get update >/dev/null && apt-get install -y --no-install-re
 # The classifier only reads the JSON stream, so dropping `-rendered-ansi`
 # costs nothing and unbreaks the old-toolchain candidates.
 BUILD_CMD = "cargo test --locked --message-format=json --no-fail-fast"
+# Relaxed variant for the LOCK_FILE_STALE retry path: regenerate Cargo.lock
+# from scratch, then build without --locked or --frozen (so cargo can
+# download the crates the regenerated lockfile points to). Recovers the
+# Dependabot-bumped-Cargo.toml-without-relock pattern documented in
+# docs/ds1-reconcile.md (overdrop-sebool, rust-central-station fork-clusters).
+# Successes from this path get a distinct status (`ok_after_relock`) so the
+# headline reproducibility number stays honest about which reproductions
+# required lockfile regeneration.
+#
+# An earlier version chained `cargo test --frozen`; --frozen forbids both
+# lock changes AND network, so it failed at "attempting to make an HTTP
+# request, but --frozen was specified" when fetching crates the new lock
+# pointed at. Plain `cargo test` is honest about the relaxation.
+BUILD_CMD_RELAXED = (
+    "cargo generate-lockfile && "
+    "cargo test --message-format=json --no-fail-fast"
+)
 
 # A tiny image used only for `git clone` + file-read during toolchain detection.
 GIT_HELPER_IMAGE = "alpine/git:latest"
@@ -120,6 +151,12 @@ class ReproductionResult:
     category — `breaking` wants pre-pass + post-fail, `non-breaking` wants
     pre-pass + post-pass, `fix-after-update` wants all three pre/post/fix
     with the middle one failing and the others passing.
+
+    pre_exit_code / post_exit_code / fix_exit_code are the *primary*
+    outcomes (majority vote when --attempts > 1). The full per-attempt
+    history lives in pre_exit_codes / post_exit_codes / fix_exit_codes
+    + the matching log-path lists; for --attempts=1 these contain a
+    single element each (or None for fix when there's no fix commit).
     """
     repo: str
     pr_number: int
@@ -134,6 +171,16 @@ class ReproductionResult:
     fix_log_path: str | None
     toolchain: str
     detected_toolchain: bool = False
+    # Per-attempt fields, populated when --attempts > 1. Always non-empty
+    # lists matching the count of attempts that ran.
+    pre_exit_codes: list[int] = field(default_factory=list)
+    post_exit_codes: list[int] = field(default_factory=list)
+    fix_exit_codes: list[int] = field(default_factory=list)
+    pre_log_paths: list[str] = field(default_factory=list)
+    post_log_paths: list[str] = field(default_factory=list)
+    fix_log_paths: list[str] = field(default_factory=list)
+    flaky_pre: bool = False
+    flaky_post: bool = False
 
     @property
     def pre_passed(self) -> bool:
@@ -212,14 +259,47 @@ def _run_in_docker(
     toolchain_image: str,
     log_out: Path,
     timeout_s: int,
+    build_cmd: str = BUILD_CMD,
 ) -> int:
     """Clone repo, checkout commit (including PR refs), run cargo test."""
+    # Refuse to start new docker work once shutdown has been requested.
+    # Otherwise a reproduce() in mid-flight (pre killed, post about to
+    # start) would spawn a fresh container the signal handler never sees,
+    # leaking compute past driver shutdown.
+    if _shutdown_requested.is_set():
+        try:
+            with log_out.open("wb") as f:
+                f.write(b"error: reproducer shutdown - pre-empted before docker run\n")
+        except OSError:
+            pass
+        return 137
     repo_url = f"https://github.com/{repo}.git"
     # Name the container so we can `docker kill` it on timeout — without this,
     # subprocess.run's TimeoutExpired terminates the `docker` CLI client but
     # leaves the daemon-side container running (hung tests = N workers
     # deadlocked waiting on container exit that never comes).
     container_name = f"cargo-repro-{uuid.uuid4().hex[:12]}"
+    # Cargo.toml-discovery shim. Many DS1 repos are polyglot projects whose
+    # Cargo.toml lives one level down (e.g. ./rust/, ./packages/server/,
+    # ./foodi-backend/). Hard-coding /src mis-counted 76 such candidates
+    # as REPO_GONE in DS1-full. Audit confirmed every one of those cases
+    # had Cargo.toml at exactly depth 1; deeper search risks picking up
+    # vendored fixture manifests, so we cap at maxdepth=2 (depth 1 from
+    # /src). Prefer a Cargo.toml carrying [workspace]; otherwise the
+    # first depth-1 manifest. Falls back to /src when nothing found.
+    discover_workdir = (
+        "WORKDIR=/src; "
+        "if [ ! -f /src/Cargo.toml ]; then "
+        "  M=$(find /src -mindepth 2 -maxdepth 2 -name Cargo.toml 2>/dev/null "
+        "    | xargs -r grep -l '^\\[workspace\\]' 2>/dev/null | head -1); "
+        "  if [ -z \"$M\" ]; then "
+        "    M=$(find /src -mindepth 2 -maxdepth 2 -name Cargo.toml 2>/dev/null "
+        "      | head -1); "
+        "  fi; "
+        "  [ -n \"$M\" ] && WORKDIR=$(dirname \"$M\"); "
+        "fi; "
+        "echo \"[reproducer] workdir=$WORKDIR\""
+    )
     # Handles both branch-tip commits and closed-PR commits that aren't
     # reachable from the default branch: first try a plain checkout, then
     # fall back to fetching the commit explicitly.
@@ -229,7 +309,9 @@ def _run_in_docker(
         f"cd /src && "
         f"(git checkout --quiet {commit} 2>/dev/null || "
         f"  (git fetch --quiet origin {commit}:_repro && git checkout --quiet _repro)) && "
-        f"{BUILD_CMD}"
+        f"{discover_workdir} && "
+        f"cd \"$WORKDIR\" && "
+        f"{build_cmd}"
     )
     cmd = [
         "docker", "run", "--rm",
@@ -298,26 +380,70 @@ def _detect_toolchain_for_candidate(candidate: dict, default: str) -> tuple[str,
     return tc, tc != default
 
 
-def reproduce(candidate: dict, logs_dir: Path, toolchain: str | None, timeout_s: int, default_image: str) -> ReproductionResult:
+def reproduce(candidate: dict, logs_dir: Path, toolchain: str | None,
+              timeout_s: int, default_image: str,
+              run_id: str | None = None,
+              relax_locked: bool = False,
+              attempts: int = 1) -> ReproductionResult:
     if toolchain is None:
         tc, detected = _detect_toolchain_for_candidate(candidate, default_image)
     else:
         tc, detected = toolchain, False
 
+    # Suffix run_id into log paths so cross-run replays don't overwrite
+    # historical evidence. Without this, a retry/re-classification run
+    # silently destroys the original DS1-full pre-log under the same
+    # post_commit short hash — which is how the 48-candidate contamination
+    # cluster ended up unauditable in 2026-05-12.
     short = candidate["post_commit"][:8]
-    pre_log = logs_dir / f"{short}-pre.log"
-    post_log = logs_dir / f"{short}-post.log"
+    suffix = f"-{run_id}" if run_id else ""
+    relax_tag = "-relock" if relax_locked else ""
+    build_cmd = BUILD_CMD_RELAXED if relax_locked else BUILD_CMD
 
-    pre_rc = _run_in_docker(candidate["repo"], candidate["pre_commit"], tc, pre_log, timeout_s)
-    post_rc = _run_in_docker(candidate["repo"], candidate["post_commit"], tc, post_log, timeout_s)
+    def _attempt_log(stage: str, idx: int) -> Path:
+        """Per-attempt log path. attempts==1 keeps the historical
+        `<short>{suffix}{relax}-{stage}.log` shape so external tools
+        that grep <short>-pre.log keep working. attempts>1 inserts
+        `-aN` to disambiguate."""
+        suf = "" if attempts == 1 else f"-a{idx + 1}"
+        return logs_dir / f"{short}{suffix}{relax_tag}-{stage}{suf}.log"
+
+    def _run_n(commit: str, stage: str) -> tuple[list[int], list[str], int, bool]:
+        """Run `attempts` invocations of (clone, checkout commit, cargo test).
+        Returns (exit_codes, log_paths, primary_rc, flaky).
+
+        primary_rc = 0 if any attempt passed, else the first non-zero rc.
+        This is asymmetric on purpose: a single passing attempt counts as
+        "the candidate can pass" — flakiness goes the other way (a passing
+        candidate that sometimes fails). flaky = True iff the attempts
+        disagree (mix of pass and non-pass exit codes)."""
+        rcs: list[int] = []
+        logs: list[str] = []
+        for i in range(attempts):
+            log = _attempt_log(stage, i)
+            rc = _run_in_docker(candidate["repo"], commit, tc, log, timeout_s, build_cmd)
+            rcs.append(rc)
+            logs.append(str(log))
+            # Once shutdown was requested, abort the loop early.
+            if _shutdown_requested.is_set():
+                break
+        if not rcs:
+            return rcs, logs, 137, False
+        passes = sum(1 for r in rcs if r == 0)
+        flaky = 0 < passes < len(rcs)
+        primary = 0 if passes > 0 else next((r for r in rcs if r != 0), rcs[0])
+        return rcs, logs, primary, flaky
+
+    pre_rcs, pre_logs, pre_rc, flaky_pre = _run_n(candidate["pre_commit"], "pre")
+    post_rcs, post_logs, post_rc, flaky_post = _run_n(candidate["post_commit"], "post")
 
     # Optional fix commit for fix-after-update candidates.
     fix_commit = candidate.get("fix_commit")
+    fix_rcs: list[int] = []
+    fix_logs: list[str] = []
     fix_rc: int | None = None
-    fix_log: Path | None = None
     if fix_commit:
-        fix_log = logs_dir / f"{short}-fix.log"
-        fix_rc = _run_in_docker(candidate["repo"], fix_commit, tc, fix_log, timeout_s)
+        fix_rcs, fix_logs, fix_rc, _ = _run_n(fix_commit, "fix")
 
     return ReproductionResult(
         repo=candidate["repo"],
@@ -328,11 +454,19 @@ def reproduce(candidate: dict, logs_dir: Path, toolchain: str | None, timeout_s:
         pre_exit_code=pre_rc,
         post_exit_code=post_rc,
         fix_exit_code=fix_rc,
-        pre_log_path=str(pre_log),
-        post_log_path=str(post_log),
-        fix_log_path=str(fix_log) if fix_log else None,
+        pre_log_path=pre_logs[0] if pre_logs else "",
+        post_log_path=post_logs[0] if post_logs else "",
+        fix_log_path=(fix_logs[0] if fix_logs else None),
         toolchain=tc,
         detected_toolchain=detected,
+        pre_exit_codes=pre_rcs,
+        post_exit_codes=post_rcs,
+        fix_exit_codes=fix_rcs,
+        pre_log_paths=pre_logs,
+        post_log_paths=post_logs,
+        fix_log_paths=fix_logs,
+        flaky_pre=flaky_pre,
+        flaky_post=flaky_post,
     )
 
 
@@ -352,6 +486,15 @@ def main() -> int:
         help="Fallback image when detection fails.",
     )
     p.add_argument("--timeout", type=int, default=1800)
+    p.add_argument("--run-id", default=None,
+                   help="Suffix added to log filenames so cross-run replays "
+                        "don't overwrite historical evidence.")
+    p.add_argument("--attempts", type=int, default=1,
+                   help="Number of repeated cargo-test invocations per "
+                        "commit (pre and post). When >1, the result records "
+                        "every attempt's exit code; the primary outcome is "
+                        "pass if any attempt passed (flakiness is then "
+                        "recorded separately).")
     args = p.parse_args()
 
     logs_dir = Path(args.logs_dir)
@@ -366,7 +509,9 @@ def main() -> int:
                     continue
                 cand = json.loads(line)
                 print(f"reproducing {cand['repo']}#{cand['pr_number']} ...", file=sys.stderr)
-                res = reproduce(cand, logs_dir, args.toolchain, args.timeout, args.default_image)
+                res = reproduce(cand, logs_dir, args.toolchain, args.timeout,
+                                args.default_image, run_id=args.run_id,
+                                attempts=args.attempts)
                 print(f"  toolchain: {res.toolchain} ({'detected' if res.detected_toolchain else 'override/default'})", file=sys.stderr)
                 out_fh.write(json.dumps(asdict(res)) + "\n")
                 out_fh.flush()

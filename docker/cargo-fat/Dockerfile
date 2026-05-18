@@ -64,6 +64,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends --allow-unauthe
 
 # Common native library -dev packages that show up in *-sys dependencies.
 # Grouped thematically; grouping is cosmetic, apt resolves everything in one pass.
+#
+# `|| true` on the round-2 additions: not every package exists on every
+# Debian release (slurm-client and libmpich-dev are missing on stretch,
+# webkit2gtk-4.0 was renamed to 4.1 in bookworm, etc.). Per-package
+# tolerance keeps the build succeeding for releases where a particular
+# library is unavailable — at the cost of *some* fat images covering
+# fewer candidates than others. The /manifest/packages.txt fingerprint
+# captures the actual outcome, so reproducibility-vs-policy is
+# distinguishable per candidate.
 RUN apt-get install -y --no-install-recommends --allow-unauthenticated \
     # crypto / TLS / networking
     libssl-dev \
@@ -90,7 +99,43 @@ RUN apt-get install -y --no-install-recommends --allow-unauthenticated \
     libdbus-1-dev \
     # misc
     libexpat1-dev \
-    libxml2-dev
+    libxml2-dev \
+ && apt-get install -y --no-install-recommends --allow-unauthenticated \
+    # Round-2 audit additions — gap-fillers surfaced by DS1-full failure
+    # classification. Per-package via `|| true` so missing packages on
+    # older releases (slurm/mpich on stretch, webkit2gtk-4.0 vs -4.1 on
+    # bookworm) don't kill the build.
+    #
+    # graphics / windowing (35 unsubcoded RUSTC_BITROT cases were linker
+    # errors against these; SDL2 alone covered 17 candidates from the
+    # evanjs/rrbg fork-cluster).
+    libsdl2-dev \
+    libxtst-dev \
+    libxcb-shape0-dev \
+    # video capture / FUSE / desktop notifications.
+    libfuse-dev \
+    libv4l-dev \
+    libnotify-dev \
+    # crypto + Python C-API + capabilities (undefined-reference linker
+    # failures: gcry_randomize ×2, PyTuple_New ×3, PyExc_Exception ×1,
+    # plus libcap-ng pkg-config misses).
+    libgcrypt20-dev \
+    libpython3-dev \
+    libcap-ng-dev \
+    # compression that wasn't already covered.
+    libsnappy-dev \
+    librrd-dev \
+    # MPI + workload-scheduler clients (HPC-flavoured Rust crates).
+    libmpich-dev \
+    slurm-client \
+    libslurm-dev \
+    || true
+
+# Rust components that live outside apt: rustfmt + clippy via rustup.
+# `|| true` because pre-rustup-component-install rustc images won't
+# accept these. Six OTHER cases were `'rustfmt' is not installed for
+# the toolchain` errors that this addresses.
+RUN rustup component add rustfmt clippy 2>/dev/null || true
 
 # libgit2-dev on stretch transitively depends on libcurl4-gnutls-dev which
 # conflicts with the libcurl4-openssl-dev we install above. buster+ doesn't

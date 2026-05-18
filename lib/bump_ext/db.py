@@ -114,9 +114,19 @@ CREATE TABLE IF NOT EXISTS fat_image_fingerprints (
 CREATE INDEX IF NOT EXISTS idx_fat_fp_platform ON fat_image_fingerprints(platform);
 CREATE INDEX IF NOT EXISTS idx_fat_fp_digest   ON fat_image_fingerprints(digest);
 
+-- Per-attempt reproduction record. One row per pre+post (and optional fix)
+-- cargo invocation pair. Bug E pre-fix: only the success path wrote here,
+-- so the table under-reported by ~50× on a 2608-candidate run. Post-fix:
+-- every reproduction (success, failure, regenerate-short-circuit) records
+-- a row; entry_id is nullable because failed reproductions never produce
+-- an entry. candidate_key lets us join to drive_state for the failure
+-- cohort without an entry. attempt_number distinguishes the N runs of
+-- the same candidate under --attempts > 1 (flakiness check).
 CREATE TABLE IF NOT EXISTS reproduction_attempts (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-  entry_id                TEXT NOT NULL,
+  entry_id                TEXT,
+  candidate_key           TEXT,
+  attempt_number          INTEGER NOT NULL DEFAULT 1,
   run_id                  TEXT,
   host_id                 TEXT NOT NULL,
   host_os                 TEXT,
@@ -136,15 +146,16 @@ CREATE TABLE IF NOT EXISTS reproduction_attempts (
   post_log_path           TEXT,
   fix_log_path            TEXT,
   notes                   TEXT,
-  FOREIGN KEY (entry_id) REFERENCES entries(id),
-  FOREIGN KEY (run_id)   REFERENCES runs(run_id)
+  FOREIGN KEY (entry_id)      REFERENCES entries(id),
+  FOREIGN KEY (run_id)        REFERENCES runs(run_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_attempts_entry    ON reproduction_attempts(entry_id);
-CREATE INDEX IF NOT EXISTS idx_attempts_run      ON reproduction_attempts(run_id);
-CREATE INDEX IF NOT EXISTS idx_attempts_host     ON reproduction_attempts(host_id);
-CREATE INDEX IF NOT EXISTS idx_attempts_fp_match ON reproduction_attempts(fingerprint_matched);
-CREATE INDEX IF NOT EXISTS idx_attempts_started  ON reproduction_attempts(started_at);
+CREATE INDEX IF NOT EXISTS idx_attempts_entry     ON reproduction_attempts(entry_id);
+CREATE INDEX IF NOT EXISTS idx_attempts_candidate ON reproduction_attempts(candidate_key);
+CREATE INDEX IF NOT EXISTS idx_attempts_run       ON reproduction_attempts(run_id);
+CREATE INDEX IF NOT EXISTS idx_attempts_host      ON reproduction_attempts(host_id);
+CREATE INDEX IF NOT EXISTS idx_attempts_fp_match  ON reproduction_attempts(fingerprint_matched);
+CREATE INDEX IF NOT EXISTS idx_attempts_started   ON reproduction_attempts(started_at);
 
 CREATE TABLE IF NOT EXISTS classifications (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,6 +199,30 @@ CREATE TABLE IF NOT EXISTS drive_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_drive_status ON drive_state(status);
+
+-- Scheme-2 (reproduction-failure) classifier output. One row per
+-- not_reproducible candidate, written either inline by cargo_drive after
+-- the reproducer returns (the live path) or post-hoc by `cargo_drive
+-- reclassify` over an existing run's logs. Earlier deployments populated
+-- this via scripts/reclassify_failures.py; that script is now a shim.
+CREATE TABLE IF NOT EXISTS drive_state_classifications (
+  run_id             TEXT NOT NULL,
+  candidate_key      TEXT NOT NULL,
+  category           TEXT NOT NULL,
+  subcategory        TEXT,
+  evidence           TEXT,
+  -- JSON dict {E_code: count} of every rustc error code seen in the
+  -- pre-log. Canonical source: cargo's JSON `compiler-message` records.
+  -- Subcategory is the most-fired code for RUSTC_BITROT — but the
+  -- distribution often matters (e.g. `lexical-core` emits 17×E0308 +
+  -- 10×E0277 in one cargo invocation; picking just one loses signal).
+  error_code_counts  TEXT,
+  classified_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (run_id, candidate_key),
+  FOREIGN KEY (run_id) REFERENCES runs(run_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dsc_category ON drive_state_classifications(category);
 
 CREATE TABLE IF NOT EXISTS gh_api_cache (
   key         TEXT PRIMARY KEY,
@@ -569,8 +604,10 @@ class PipelineDB:
     def record_attempt(
         self,
         *,
-        entry_id: str,
         host_id: str,
+        entry_id: str | None = None,
+        candidate_key: str | None = None,
+        attempt_number: int = 1,
         run_id: str | None = None,
         host_os: str | None = None,
         host_arch: str | None = None,
@@ -590,18 +627,25 @@ class PipelineDB:
         fix_log_path: str | None = None,
         notes: str | None = None,
     ) -> int:
+        """Record one reproduction attempt. entry_id is nullable (failed
+        reproductions never produce an entry); candidate_key is the
+        owner/repo#PR string for the failure-cohort join. attempt_number
+        is 1-indexed, used by the multi-attempt flakiness check."""
         cur = self.conn.execute(
             """INSERT INTO reproduction_attempts
-                 (entry_id, run_id, host_id, host_os, host_arch,
+                 (entry_id, candidate_key, attempt_number, run_id,
+                  host_id, host_os, host_arch,
                   docker_buildx_version, started_at, finished_at,
                   fat_image_tag_used, fingerprint_expected, fingerprint_actual,
                   fingerprint_matched, pre_exit_code, post_exit_code,
                   fix_exit_code, outcome_matched,
                   pre_log_path, post_log_path, fix_log_path, notes)
-               VALUES (?, ?, ?, ?, ?,   ?, ?, ?,   ?, ?, ?,
+               VALUES (?, ?, ?, ?,   ?, ?, ?,   ?, ?, ?,   ?, ?, ?,
                        ?, ?, ?,   ?, ?,   ?, ?, ?, ?)""",
             (
                 entry_id,
+                candidate_key,
+                attempt_number,
                 run_id,
                 host_id,
                 host_os,
@@ -741,6 +785,51 @@ class PipelineDB:
                 commit_date,
                 reason,
                 updated_at or _utcnow_iso(),
+            ),
+        )
+
+    # ---- drive_state_classifications ----------------------------------------
+
+    def upsert_drive_state_classification(
+        self,
+        *,
+        run_id: str,
+        candidate_key: str,
+        category: str,
+        subcategory: str | None = None,
+        evidence: str | None = None,
+        error_code_counts: dict[str, int] | None = None,
+        classified_at: str | None = None,
+    ) -> None:
+        """Write a Scheme-2 classification row. Idempotent — overwrites on
+        conflict so re-classifying with newer rules updates the record in
+        place. `error_code_counts` is a `{E_code: count}` dict; serialised
+        as JSON. Empty dict and None both store NULL (no signal vs no data
+        is indistinguishable in practice for this column)."""
+        ecc_json = (
+            json.dumps(error_code_counts, sort_keys=True)
+            if error_code_counts else None
+        )
+        self.conn.execute(
+            """INSERT INTO drive_state_classifications
+                 (run_id, candidate_key, category, subcategory, evidence,
+                  error_code_counts, classified_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(run_id, candidate_key) DO UPDATE SET
+                 category=excluded.category,
+                 subcategory=excluded.subcategory,
+                 evidence=excluded.evidence,
+                 error_code_counts=excluded.error_code_counts,
+                 classified_at=excluded.classified_at
+            """,
+            (
+                run_id,
+                candidate_key,
+                category,
+                subcategory,
+                evidence,
+                ecc_json,
+                classified_at or _utcnow_iso(),
             ),
         )
 

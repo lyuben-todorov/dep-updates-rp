@@ -39,6 +39,16 @@ set -eux -o pipefail
 
 . /etc/os-release
 
+# RP2026 local patch (2026-05-13): older Debian releases (rust:1.30.0-stretch
+# and rust:1.35.0-stretch tested empirically) ship /etc/os-release without
+# VERSION_CODENAME — only VERSION="9 (stretch)" is present. Falling back
+# means the pre-1.39 stretch fat-image builds work without modifying every
+# downstream consumer of this variable. The 1.39+ stretch base image
+# already populates VERSION_CODENAME directly.
+if [ -z "${VERSION_CODENAME:-}" ] && [ -n "${VERSION:-}" ]; then
+	VERSION_CODENAME=$(echo "${VERSION}" | sed -n 's/.*(\([^)]*\)).*/\1/p')
+fi
+
 : "${KEEP_CACHE:=1}"
 
 keep_apt_cache() {

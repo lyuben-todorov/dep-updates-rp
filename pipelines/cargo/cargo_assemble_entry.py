@@ -60,6 +60,10 @@ FINGERPRINT_FILES = ["packages.txt", "rustc.txt", "cargo.txt", "os-release", "so
 # `deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260415T000000Z bookworm main`.
 SNAPSHOT_RE = re.compile(r"/archive/debian/(\d{8}T\d{6}Z)\s")
 OS_RELEASE_CODENAME_RE = re.compile(r'^VERSION_CODENAME=(\w+)', re.MULTILINE)
+# Fallback for older Debian releases (rust:1.30/1.35-stretch base images)
+# whose /etc/os-release lacks VERSION_CODENAME — they ship VERSION="9
+# (stretch)" only. Parses the codename out of the parenthesised tail.
+OS_RELEASE_VERSION_PAREN_RE = re.compile(r'^VERSION="\d+\s*\(([a-z]+)\)"', re.MULTILINE)
 RUSTC_VERSION_RE = re.compile(r"^rustc (\d+\.\d+\.\d+)")
 
 
@@ -137,9 +141,15 @@ def derive_fat_image_fields(manifest_dir: Path) -> tuple[str, str, str]:
 
     os_release = (manifest_dir / "os-release").read_text()
     m = OS_RELEASE_CODENAME_RE.search(os_release)
-    if not m:
-        raise AssembleError(f"could not parse VERSION_CODENAME from os-release:\n{os_release}")
-    debian_release = m.group(1)
+    if m:
+        debian_release = m.group(1)
+    else:
+        m = OS_RELEASE_VERSION_PAREN_RE.search(os_release)
+        if not m:
+            raise AssembleError(
+                f"could not parse VERSION_CODENAME from os-release:\n{os_release}"
+            )
+        debian_release = m.group(1)
 
     return rust_version, apt_snapshot, debian_release
 

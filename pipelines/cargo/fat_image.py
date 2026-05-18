@@ -54,13 +54,15 @@ SNAPSHOT_RE = re.compile(r"^(\d{8})T\d{6}Z$")
 # Rust milestones we pick fat images at. MSRVs get rounded *up* to the
 # smallest milestone ≥ MSRV — this is what makes (1.49, 2020) and (1.56, 2020)
 # buckets share an image.
-MILESTONES = ["1.39", "1.49", "1.56", "1.65", "1.75", "1.85", "1.92"]
+MILESTONES = ["1.30", "1.35", "1.39", "1.49", "1.56", "1.65", "1.75", "1.85", "1.92"]
 
 # Upstream release dates, authoritative from rust-lang/rust/RELEASES.md (verified
 # 2026-05-05). When MILESTONES grows, re-fetch:
 #   curl -sfL https://raw.githubusercontent.com/rust-lang/rust/master/RELEASES.md \
 #     | grep -E "^Version 1\.(...)\\.0"
 MILESTONE_RELEASE_DATES: dict[str, dt.date] = {
+    "1.30": dt.date(2018, 10, 25),
+    "1.35": dt.date(2019,  5, 23),
     "1.39": dt.date(2019, 11,  7),
     "1.49": dt.date(2020, 12, 31),
     "1.56": dt.date(2021, 10, 21),
@@ -78,6 +80,15 @@ MILESTONE_RELEASE_DATES: dict[str, dt.date] = {
 # Why hardcoded: avoids a network call at bucketize time, and the grid
 # changes only when Docker Hub adds a track (rarely).
 MILESTONE_DEBIAN_SUPPORTED: set[tuple[str, str]] = {
+    # 1.30 anchors edition-2018 boundary (rustc 1.31 was the first stable
+    # edition-2018 compiler; 1.30 is the last pre-edition compiler that
+    # still accepts pre-edition module-resolution syntax).
+    ("1.30", "stretch"),
+    # 1.35 is the last pre-NLL stable rustc (full NLL stabilised in 1.36).
+    # Code from 2018-pre-1.36 era that relies on lexical borrows compiles
+    # cleanly here; the NLL-cluster of E0713/E0506/E0621/E0503/E0502
+    # bitrots upward.
+    ("1.35", "stretch"),
     ("1.39", "stretch"), ("1.39", "buster"),
     ("1.49", "buster"),
     ("1.56", "buster"), ("1.56", "bullseye"),
@@ -182,19 +193,38 @@ def round_up_to_milestone(msrv: str) -> str | None:
 def latest_milestone_before(commit_date: dt.date) -> str:
     """Largest milestone whose release date is ≤ commit_date.
 
-    Used by `bucket_for` as the fallback when a candidate has no
-    declared MSRV — picks the rust the PR author was plausibly
-    targeting rather than a language-edition floor that understates
-    what the code actually needs.
-
-    For commit dates before any milestone's release (pre-2020 PRs),
-    returns the smallest milestone in MILESTONES. Those rows will
-    carry pre_rust_base anyway once canonical_sde_for runs.
+    Used as one input to `era_milestone_for_commit` — the era-floor
+    walks BACK from the commit. Kept exposed for callers that need
+    the strict "what was current at the commit" answer (e.g. dashboards).
     """
     below = [m for m in MILESTONES if MILESTONE_RELEASE_DATES[m] <= commit_date]
     if not below:
         return MILESTONES[0]
     return max(below, key=parse_semver)
+
+
+def era_milestone_for_commit(commit_date: dt.date) -> str:
+    """Pick the milestone that best matches the rustc the PR author was
+    actually using around `commit_date`. Rounds **up** to the next
+    milestone we ship rather than down: between two milestones, the
+    actual contemporary rustc was minor versions newer than the lower
+    milestone, and modern transitive deps in the project's lockfile
+    will trip on the lower one.
+
+    Concretely: rustc 1.45 was current on 2020-08-25 — we don't ship
+    1.45, so we pick 1.49 (the next we ship), not 1.39 (the previous).
+    A 2020-era project's lockfile may pull in `remove_dir_all 0.5.3`
+    which uses `cfg(doctest)` (stabilised 1.40), and 1.39 rejects it.
+    Picking 1.49 means we slightly over-shoot rust on the OS-era axis
+    but recover the candidate; under-shooting kills it.
+
+    For commit dates after the largest milestone's release, returns the
+    largest milestone (no upward bump available).
+    """
+    above = [m for m in MILESTONES if MILESTONE_RELEASE_DATES[m] >= commit_date]
+    if above:
+        return min(above, key=parse_semver)
+    return MILESTONES[-1]
 
 
 def _reroute_to_supported(milestone: str, debian: str) -> str | None:
@@ -225,8 +255,17 @@ def bucket_for(rust_msrv: str | None, commit_date: dt.date, debian: str) -> Buck
     image can serve this (milestone, debian) pair.
 
     Steps:
-      1. Pick the initial milestone: round_up_to_milestone(rust_msrv)
-         when MSRV is known, else latest_milestone_before(commit_date).
+      1. Pick the initial milestone:
+           era      = latest_milestone_before(commit_date)
+           floor    = round_up_to_milestone(rust_msrv) if MSRV declared
+           milestone = max(floor, era)
+         The era picks the rustc the PR author was plausibly targeting.
+         The MSRV floor is a *minimum*: a project declaring MSRV=1.31 in
+         2020 was still being compiled by its author against rustc ≥1.45
+         and pulls in transitive deps (e.g. `remove_dir_all 0.5.3` using
+         `cfg(doctest)` stabilised in 1.40) that fail on older rustc.
+         Routing strictly to the MSRV milestone regresses entries that
+         ds1-full-crack reproduced cleanly on the era milestone.
       2. If (milestone, debian) isn't a published rust:<patch>-<debian>
          tag on Docker Hub, reroute upward to the smallest supported
          milestone on that debian. This keeps the OS era intact and
@@ -234,10 +273,17 @@ def bucket_for(rust_msrv: str | None, commit_date: dt.date, debian: str) -> Buck
       3. Return None if rerouting finds no viable milestone — that
          debian never hosted a supported rustc on this track.
     """
+    era_milestone = era_milestone_for_commit(commit_date)
     if rust_msrv is None:
-        milestone: str | None = latest_milestone_before(commit_date)
+        milestone: str | None = era_milestone
     else:
-        milestone = round_up_to_milestone(rust_msrv)
+        floor = round_up_to_milestone(rust_msrv)
+        # max() under semver-tuple order, falling back to era when floor
+        # is None (msrv unparseable or above largest milestone).
+        if floor is None:
+            milestone = era_milestone
+        else:
+            milestone = max(floor, era_milestone, key=parse_semver)
     if milestone is None:
         return None
     milestone = _reroute_to_supported(milestone, debian)
@@ -428,14 +474,36 @@ def save_index(records: Iterable[FatImageRecord], path: Path = INDEX_PATH) -> No
         f.write("\n")
 
 
-def register(record: FatImageRecord, path: Path = INDEX_PATH) -> None:
-    """Append a new record, rejecting tag collisions."""
+def register(record: FatImageRecord, path: Path = INDEX_PATH,
+             *, update: bool = False) -> None:
+    """Append a new record, rejecting tag collisions unless update=True.
+
+    With update=True, replaces an existing record at the same tag in
+    place. Used when an image is rebuilt under its existing name (the
+    fingerprint changes; the index needs to track the new fingerprint).
+    """
     records = load_index(path)
-    for r in records:
+    for i, r in enumerate(records):
         if r.tag == record.tag:
-            raise IndexError(f"tag already registered: {record.tag}")
+            if not update:
+                raise IndexError(f"tag already registered: {record.tag}")
+            records[i] = record
+            save_index(records, path)
+            return
     records.append(record)
     save_index(records, path)
+
+
+def unregister(tag: str, path: Path = INDEX_PATH) -> bool:
+    """Remove `tag` from the index. Returns True if removed, False if it
+    wasn't present. Doesn't touch the actual image (use `docker rmi`
+    separately if you want that gone too)."""
+    records = load_index(path)
+    new = [r for r in records if r.tag != tag]
+    if len(new) == len(records):
+        return False
+    save_index(new, path)
+    return True
 
 
 # ---- build helper ------------------------------------------------------------
@@ -528,9 +596,17 @@ def introspect_fat_image(tag: str) -> FatImageRecord:
 
         os_release = (out / "os-release").read_text()
         m = re.search(r'^VERSION_CODENAME=(\w+)', os_release, re.MULTILINE)
-        if not m:
-            raise IndexError(f"could not parse VERSION_CODENAME from os-release")
-        debian_release = m.group(1)
+        if m:
+            debian_release = m.group(1)
+        else:
+            # Older debian releases (rust:1.30/1.35-stretch base images) ship
+            # /etc/os-release without VERSION_CODENAME — only VERSION="9
+            # (stretch)" is present. Fall back to parsing the codename
+            # from the parenthesised tail of VERSION.
+            m = re.search(r'^VERSION="\d+\s*\(([a-z]+)\)"', os_release, re.MULTILINE)
+            if not m:
+                raise IndexError("could not parse VERSION_CODENAME from os-release")
+            debian_release = m.group(1)
 
         rustc_txt = (out / "rustc.txt").read_text()
         m = re.search(r"^rustc (\d+\.\d+\.\d+)", rustc_txt)
@@ -685,6 +761,14 @@ def _cli_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cli_unregister(args: argparse.Namespace) -> int:
+    if unregister(args.tag):
+        print(f"unregistered {args.tag}")
+        return 0
+    print(f"tag not in index: {args.tag}", file=sys.stderr)
+    return 1
+
+
 def _cli_register(args: argparse.Namespace) -> int:
     try:
         record = introspect_fat_image(args.tag)
@@ -693,11 +777,11 @@ def _cli_register(args: argparse.Namespace) -> int:
         return 2
     record = dataclasses.replace(record, firstSeenAt=dt.date.today().isoformat(), notes=args.notes)
     try:
-        register(record)
+        register(record, update=args.update)
     except IndexError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
-    print(f"registered {record.tag}")
+    print(f"{'updated' if args.update else 'registered'} {record.tag}")
     return 0
 
 
@@ -728,9 +812,18 @@ def main() -> int:
     prg = sub.add_parser("register", help="Introspect an already-built image and register it.")
     prg.add_argument("--tag", required=True, help="Image tag to register.")
     prg.add_argument("--notes", default=None, help="Human notes.")
+    prg.add_argument("--update", action="store_true",
+                     help="Replace an existing index entry under the same tag "
+                          "instead of failing with 'tag already registered'. "
+                          "Used when rebuilding an image under its existing name.")
+
+    pu = sub.add_parser("unregister", help="Remove a tag from the index "
+                                           "(doesn't delete the docker image).")
+    pu.add_argument("--tag", required=True, help="Image tag to remove from the index.")
 
     args = p.parse_args()
-    cmds = {"list": _cli_list, "resolve": _cli_resolve, "build": _cli_build, "register": _cli_register}
+    cmds = {"list": _cli_list, "resolve": _cli_resolve, "build": _cli_build,
+            "register": _cli_register, "unregister": _cli_unregister}
     return cmds[args.cmd](args)
 
 

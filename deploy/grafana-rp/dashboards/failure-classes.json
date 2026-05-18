@@ -1,0 +1,199 @@
+{
+  "title": "Failure Classes",
+  "uid": "failure-classes",
+  "tags": ["rp2026", "pipeline", "failure-taxonomy"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": {"from": "now-30d", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "run_id",
+        "label": "Run",
+        "type": "query",
+        "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+        "query": "SELECT DISTINCT run_id FROM drive_state_classifications ORDER BY run_id DESC",
+        "includeAll": false,
+        "multi": false,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total not_reproducible classified",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT COUNT(*) AS value FROM drive_state_classifications WHERE run_id = '$run_id'",
+        "queryText": "SELECT COUNT(*) AS value FROM drive_state_classifications WHERE run_id = '$run_id'",
+        "timeColumns": []
+      }],
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2,
+      "title": "Distinct categories",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT COUNT(DISTINCT category) AS value FROM drive_state_classifications WHERE run_id = '$run_id'",
+        "queryText": "SELECT COUNT(DISTINCT category) AS value FROM drive_state_classifications WHERE run_id = '$run_id'",
+        "timeColumns": []
+      }],
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3,
+      "title": "Reclassified at",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT MAX(classified_at) AS value FROM drive_state_classifications WHERE run_id = '$run_id'",
+        "queryText": "SELECT MAX(classified_at) AS value FROM drive_state_classifications WHERE run_id = '$run_id'",
+        "timeColumns": []
+      }],
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value"}
+    },
+    {
+      "id": 10,
+      "title": "Failure-class distribution",
+      "type": "barchart",
+      "gridPos": {"h": 12, "w": 14, "x": 0, "y": 4},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT category, COUNT(*) AS count FROM drive_state_classifications WHERE run_id = '$run_id' GROUP BY category ORDER BY count DESC",
+        "queryText": "SELECT category, COUNT(*) AS count FROM drive_state_classifications WHERE run_id = '$run_id' GROUP BY category ORDER BY count DESC",
+        "timeColumns": []
+      }],
+      "options": {"orientation": "horizontal", "xTickLabelRotation": 0, "stacking": "none", "showValue": "always"}
+    },
+    {
+      "id": 11,
+      "title": "Categories — table",
+      "type": "table",
+      "gridPos": {"h": 12, "w": 10, "x": 14, "y": 4},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT category, COUNT(*) AS n, ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM drive_state_classifications WHERE run_id = '$run_id'), 1) AS pct FROM drive_state_classifications WHERE run_id = '$run_id' GROUP BY category ORDER BY n DESC",
+        "queryText": "SELECT category, COUNT(*) AS n, ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM drive_state_classifications WHERE run_id = '$run_id'), 1) AS pct FROM drive_state_classifications WHERE run_id = '$run_id' GROUP BY category ORDER BY n DESC",
+        "timeColumns": []
+      }],
+      "options": {"showHeader": true},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "auto"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "pct"}, "properties": [{"id": "unit", "value": "percent"}]}
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "title": "RUSTC_BITROT — top E-codes (subcategories)",
+      "type": "barchart",
+      "gridPos": {"h": 12, "w": 14, "x": 0, "y": 16},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT COALESCE(subcategory, '(none)') AS subcategory, COUNT(*) AS count FROM drive_state_classifications WHERE run_id = '$run_id' AND category = 'RUSTC_BITROT' GROUP BY subcategory ORDER BY count DESC LIMIT 20",
+        "queryText": "SELECT COALESCE(subcategory, '(none)') AS subcategory, COUNT(*) AS count FROM drive_state_classifications WHERE run_id = '$run_id' AND category = 'RUSTC_BITROT' GROUP BY subcategory ORDER BY count DESC LIMIT 20",
+        "timeColumns": []
+      }],
+      "options": {"orientation": "horizontal", "xTickLabelRotation": 0, "stacking": "none", "showValue": "always"}
+    },
+    {
+      "id": 21,
+      "title": "Subcategories — all categories",
+      "type": "table",
+      "gridPos": {"h": 12, "w": 10, "x": 14, "y": 16},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT category, COALESCE(subcategory, '(none)') AS subcategory, COUNT(*) AS n FROM drive_state_classifications WHERE run_id = '$run_id' AND subcategory IS NOT NULL GROUP BY category, subcategory ORDER BY category, n DESC",
+        "queryText": "SELECT category, COALESCE(subcategory, '(none)') AS subcategory, COUNT(*) AS n FROM drive_state_classifications WHERE run_id = '$run_id' AND subcategory IS NOT NULL GROUP BY category, subcategory ORDER BY category, n DESC",
+        "timeColumns": []
+      }],
+      "options": {"showHeader": true}
+    },
+    {
+      "id": 30,
+      "title": "Category × fat image",
+      "type": "table",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 28},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT c.category, COALESCE(d.fat_image_tag, '(none)') AS fat_image, COUNT(*) AS n FROM drive_state_classifications c JOIN drive_state d ON c.run_id = d.run_id AND c.candidate_key = d.candidate_key WHERE c.run_id = '$run_id' GROUP BY c.category, d.fat_image_tag ORDER BY c.category, n DESC",
+        "queryText": "SELECT c.category, COALESCE(d.fat_image_tag, '(none)') AS fat_image, COUNT(*) AS n FROM drive_state_classifications c JOIN drive_state d ON c.run_id = d.run_id AND c.candidate_key = d.candidate_key WHERE c.run_id = '$run_id' GROUP BY c.category, d.fat_image_tag ORDER BY c.category, n DESC",
+        "timeColumns": []
+      }],
+      "options": {"showHeader": true}
+    },
+    {
+      "id": 40,
+      "title": "Category × commit year",
+      "type": "table",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 42},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT c.category, COALESCE(SUBSTR(d.commit_date, 1, 4), '????') AS year, COUNT(*) AS n FROM drive_state_classifications c JOIN drive_state d ON c.run_id = d.run_id AND c.candidate_key = d.candidate_key WHERE c.run_id = '$run_id' GROUP BY c.category, year ORDER BY c.category, year",
+        "queryText": "SELECT c.category, COALESCE(SUBSTR(d.commit_date, 1, 4), '????') AS year, COUNT(*) AS n FROM drive_state_classifications c JOIN drive_state d ON c.run_id = d.run_id AND c.candidate_key = d.candidate_key WHERE c.run_id = '$run_id' GROUP BY c.category, year ORDER BY c.category, year",
+        "timeColumns": []
+      }],
+      "options": {"showHeader": true}
+    },
+    {
+      "id": 50,
+      "title": "Top fork-cluster repos per category",
+      "type": "table",
+      "gridPos": {"h": 16, "w": 24, "x": 0, "y": 56},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "WITH parsed AS (SELECT category, SUBSTR(candidate_key, 1, INSTR(candidate_key, '#') - 1) AS repo FROM drive_state_classifications WHERE run_id = '$run_id') SELECT category, repo, COUNT(*) AS candidates FROM parsed GROUP BY category, repo HAVING candidates >= 3 ORDER BY category, candidates DESC",
+        "queryText": "WITH parsed AS (SELECT category, SUBSTR(candidate_key, 1, INSTR(candidate_key, '#') - 1) AS repo FROM drive_state_classifications WHERE run_id = '$run_id') SELECT category, repo, COUNT(*) AS candidates FROM parsed GROUP BY category, repo HAVING candidates >= 3 ORDER BY category, candidates DESC",
+        "timeColumns": []
+      }],
+      "options": {"showHeader": true}
+    },
+    {
+      "id": 60,
+      "title": "Recent classifications (last 100)",
+      "type": "table",
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 72},
+      "datasource": {"type": "frser-sqlite-datasource", "uid": "pipeline-sqlite"},
+      "targets": [{
+        "refId": "A",
+        "queryType": "table",
+        "rawQueryText": "SELECT classified_at, candidate_key, category, COALESCE(subcategory, '') AS subcategory, SUBSTR(COALESCE(evidence, ''), 1, 120) AS evidence FROM drive_state_classifications WHERE run_id = '$run_id' ORDER BY classified_at DESC, candidate_key LIMIT 100",
+        "queryText": "SELECT classified_at, candidate_key, category, COALESCE(subcategory, '') AS subcategory, SUBSTR(COALESCE(evidence, ''), 1, 120) AS evidence FROM drive_state_classifications WHERE run_id = '$run_id' ORDER BY classified_at DESC, candidate_key LIMIT 100",
+        "timeColumns": []
+      }],
+      "options": {"showHeader": true}
+    }
+  ]
+}

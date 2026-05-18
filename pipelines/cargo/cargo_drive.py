@@ -53,6 +53,7 @@ from bump_ext import PipelineDB, SchemaError, validate_entry  # noqa: E402
 
 from . import cargo_assemble_entry as _assemble
 from . import cargo_classifier as _classifier
+from . import cargo_failure_classifier as _failure_classifier
 from . import cargo_regenerate as _regenerate
 from . import cargo_reproducer as _reproducer
 from . import cargo_toolchain as _toolchain
@@ -90,6 +91,17 @@ def _msrv_floor_for(commit_date: dt.date | None) -> str:
 
 class Status:
     OK = "ok"
+    # Reproduction succeeded only after `cargo generate-lockfile && cargo test
+    # --frozen` (i.e. the original Cargo.lock was rejected with --locked).
+    # Distinct from OK so the headline reproducibility number can split
+    # "reproducible under the strict contract" from "reproducible after
+    # lockfile regeneration". Operator opts in via --relax-locked.
+    OK_AFTER_RELOCK = "ok_after_relock"
+    # Multi-attempt mode: per-stage attempts disagreed (some passed, some
+    # failed). One status covers both directions — there's no honest way
+    # to call a flaky candidate "ok" or "not reproducible", and a single
+    # FLAKY label keeps the headline split clean: ok / flaky / not_reproducible.
+    FLAKY = "flaky"
     FAT_IMAGE_MISSING = "fat_image_missing"
     FAT_IMAGE_BUILD_FAILED = "fat_image_build_failed"
     NOT_REPRODUCIBLE = "not_reproducible"
@@ -102,7 +114,8 @@ class Status:
     # opt into the old-entry-discard-and-reassemble path.
     ENTRY_BUCKET_STALE = "entry_bucket_stale"
 
-    TERMINAL_SUCCESS = {OK}
+    TERMINAL_SUCCESS = {OK, OK_AFTER_RELOCK}
+    TERMINAL_FLAKY = {FLAKY}
     TERMINAL_FAILURE = {
         FAT_IMAGE_MISSING, FAT_IMAGE_BUILD_FAILED, NOT_REPRODUCIBLE,
         ASSEMBLE_FAILED, REGENERATE_MISMATCH, METADATA_FETCH_FAILED,
@@ -121,6 +134,21 @@ class DriveRecord:
     max_sde_date: str | None = None       # run parameter, recorded for traceability
     reason: str | None = None
     timestamp: str = ""
+    # Scheme-2 classification, populated inline by `process()` when status
+    # is NOT_REPRODUCIBLE. Mirrored to drive_state_classifications.
+    failure_category: str | None = None
+    failure_subcategory: str | None = None
+    failure_evidence: str | None = None
+    # Full distribution of rustc E-codes seen in the pre-log (canonical
+    # source: cargo's JSON compiler-message stream). For RUSTC_BITROT
+    # candidates this captures the 17×E0308 + 10×E0277 -style multi-code
+    # picture that subcategory (one code) flattens. Empty dict when no
+    # rustc errors are present (most non-RUSTC failure modes).
+    failure_error_code_counts: dict | None = None
+    # Multi-attempt flakiness annotations. Set when attempts > 1 and the
+    # repeated cargo-test invocations disagreed.
+    flaky_pre: bool = False
+    flaky_post: bool = False
 
 
 def _key(candidate: dict) -> str:
@@ -177,6 +205,60 @@ def _ledger_digest_for_this_host(record) -> str | None:
     return fp.digest if fp else None
 
 
+def _record_repro_attempts(db: PipelineDB, run_id: str, *,
+                           candidate_key: str, host_label: str | None,
+                           started_at: str, fat_image_tag: str | None,
+                           fingerprint: str | None, repro,
+                           outcome_matched: bool | None = None,
+                           entry_id: str | None = None) -> None:
+    """Write one row per attempt to reproduction_attempts. Bug E pre-fix
+    only the success path called record_attempt; this helper folds in
+    failure / regenerate-mismatch / multi-attempt paths so the table
+    reflects every cargo-test invocation. attempt_number defaults to 1
+    for the single-attempt case; multi-attempt callers iterate.
+    """
+    if db is None:
+        return
+    finished_at = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    base = dict(
+        host_id=host_label or socket.gethostname(),
+        run_id=run_id,
+        candidate_key=candidate_key,
+        host_os=host_platform.system().lower(),
+        host_arch=_docker_platform(),
+        started_at=started_at,
+        finished_at=finished_at,
+        fat_image_tag_used=fat_image_tag,
+        fingerprint_expected=fingerprint,
+        fingerprint_actual=fingerprint,
+        fingerprint_matched=fingerprint is not None,
+        outcome_matched=outcome_matched,
+        entry_id=entry_id,
+    )
+    # Per-attempt rows: when the reproducer ran a single attempt we still
+    # write attempt_number=1 so the table is queryable uniformly.
+    attempt_pre = list(getattr(repro, "pre_exit_codes", None) or [repro.pre_exit_code])
+    attempt_post = list(getattr(repro, "post_exit_codes", None) or [repro.post_exit_code])
+    attempt_fix = list(getattr(repro, "fix_exit_codes", None) or
+                       ([repro.fix_exit_code] if repro.fix_exit_code is not None else []))
+    pre_logs = list(getattr(repro, "pre_log_paths", None) or [repro.pre_log_path])
+    post_logs = list(getattr(repro, "post_log_paths", None) or [repro.post_log_path])
+    fix_logs = list(getattr(repro, "fix_log_paths", None) or
+                    ([repro.fix_log_path] if repro.fix_log_path else []))
+    n = max(len(attempt_pre), len(attempt_post))
+    for i in range(n):
+        db.record_attempt(
+            attempt_number=i + 1,
+            pre_exit_code=attempt_pre[i] if i < len(attempt_pre) else None,
+            post_exit_code=attempt_post[i] if i < len(attempt_post) else None,
+            fix_exit_code=attempt_fix[i] if i < len(attempt_fix) else None,
+            pre_log_path=pre_logs[i] if i < len(pre_logs) else None,
+            post_log_path=post_logs[i] if i < len(post_logs) else None,
+            fix_log_path=fix_logs[i] if i < len(fix_logs) else None,
+            **base,
+        )
+
+
 def _mirror_drive_state(db: PipelineDB, run_id: str, rec: DriveRecord) -> None:
     db.upsert_drive_state(
         run_id=run_id,
@@ -189,6 +271,18 @@ def _mirror_drive_state(db: PipelineDB, run_id: str, rec: DriveRecord) -> None:
         reason=rec.reason,
         updated_at=rec.timestamp or None,
     )
+    # Scheme-2 classification mirror: only populated for not_reproducible
+    # records (process() leaves it None for ok/breaking/non-breaking).
+    if rec.failure_category is not None:
+        db.upsert_drive_state_classification(
+            run_id=run_id,
+            candidate_key=rec.candidate_key,
+            category=rec.failure_category,
+            subcategory=rec.failure_subcategory,
+            evidence=rec.failure_evidence,
+            error_code_counts=rec.failure_error_code_counts,
+            classified_at=rec.timestamp or None,
+        )
 
 
 # ---- candidate metadata (MSRV + commit date) --------------------------------
@@ -401,7 +495,9 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
             db: PipelineDB | None = None,
             run_id: str | None = None,
             db_lock: threading.Lock | None = None,
-            force_fat_image: str | None = None) -> DriveRecord:
+            force_fat_image: str | None = None,
+            relax_locked: bool = False,
+            attempts: int = 1) -> DriveRecord:
     key = _key(candidate)
     now = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     rec = DriveRecord(candidate_key=key, status="", timestamp=now,
@@ -499,7 +595,10 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
     print(f"[{key}] reproducing...", file=sys.stderr)
     repro = _reproducer.reproduce(
         candidate, logs_dir, resolve_match.tag, timeout_s, resolve_match.tag,
+        run_id=run_id, attempts=attempts,
     )
+    rec.flaky_pre = repro.flaky_pre
+    rec.flaky_post = repro.flaky_post
 
     # Decide category from raw pass/fail facts. We don't get the category
     # from the candidate; we *discover* it here.
@@ -518,7 +617,77 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
         else:
             rec.reason = (f"pre_build_failed (pre_rc={repro.pre_exit_code}, "
                           f"post_rc={repro.post_exit_code})")
-        return rec
+        # Inline Scheme-2 classification. Write a row in
+        # drive_state_classifications alongside drive_state so the failure
+        # taxonomy is populated as the run progresses, not days later via
+        # an off-driver script. Reason-only short-circuit handles
+        # timeouts without paying the log read.
+        from_reason = _failure_classifier.classify_from_reason(rec.reason)
+        if from_reason is not None:
+            cat, sub, ev = from_reason
+            ecc: dict[str, int] = {}
+        else:
+            try:
+                pre_text = Path(repro.pre_log_path).read_text(errors="replace")
+            except OSError:
+                pre_text = ""
+            if not pre_text:
+                cat, sub, ev = "NO_LOG", None, "no error line in pre-log"
+                ecc = {}
+            else:
+                cat, sub, ev, ecc = _failure_classifier.classify_full(pre_text)
+        rec.failure_category = cat
+        rec.failure_subcategory = sub
+        rec.failure_evidence = ev
+        rec.failure_error_code_counts = ecc or None
+
+        # --relax-locked retry path. When LOCK_FILE_STALE is the failure
+        # cause, retry once with `cargo generate-lockfile && cargo test
+        # --frozen`. Successful retries get `ok_after_relock` (distinct
+        # from OK so the headline reproducibility number doesn't conflate
+        # strict-contract success with lockfile-regenerated success).
+        if relax_locked and cat == "LOCK_FILE_STALE":
+            print(f"[{key}] LOCK_FILE_STALE — retrying with relax_locked",
+                  file=sys.stderr)
+            relock = _reproducer.reproduce(
+                candidate, logs_dir, resolve_match.tag, timeout_s,
+                resolve_match.tag, run_id=run_id, relax_locked=True,
+            )
+            if relock.pre_passed and relock.post_passed:
+                rec.status = Status.OK_AFTER_RELOCK
+                rec.reason = (f"ok_after_relock (orig pre={repro.pre_exit_code}, "
+                              f"relock pre={relock.pre_exit_code}/post={relock.post_exit_code})")
+                # Drop the failure-classification fields — this is now a success.
+                rec.failure_category = None
+                rec.failure_subcategory = None
+                rec.failure_evidence = None
+                rec.failure_error_code_counts = None
+                # The relock'd repro becomes the entry-assembly source.
+                repro = relock
+                # Fall through to the breaking/non-breaking decision below.
+            else:
+                # Relock didn't help; keep the original failure record but
+                # annotate that we tried.
+                rec.reason += " (relock retry failed)"
+                if db is not None:
+                    with (db_lock if db_lock is not None else nullcontext()):
+                        _record_repro_attempts(
+                            db, run_id, candidate_key=key, host_label=host_label,
+                            started_at=now, fat_image_tag=resolve_match.tag,
+                            fingerprint=_ledger_digest_for_this_host(resolve_match),
+                            repro=repro,
+                        )
+                return rec
+        else:
+            if db is not None:
+                with (db_lock if db_lock is not None else nullcontext()):
+                    _record_repro_attempts(
+                        db, run_id, candidate_key=key, host_label=host_label,
+                        started_at=now, fat_image_tag=resolve_match.tag,
+                        fingerprint=_ledger_digest_for_this_host(resolve_match),
+                        repro=repro,
+                    )
+            return rec
 
     if not repro.post_passed:
         discovered_category = "breaking"
@@ -584,27 +753,16 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
                 source_ref=key,
                 ingested_by="cargo_drive.py",
             )
-            db.record_attempt(
-                entry_id=entry_id,
-                run_id=run_id,
-                host_id=host_label or socket.gethostname(),
-                host_os=host_platform.system().lower(),
-                host_arch=_docker_platform(),
+            _record_repro_attempts(
+                db, run_id,
+                candidate_key=key,
+                host_label=host_label,
                 started_at=now,
-                finished_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-                fat_image_tag_used=resolve_match.tag,
-                # v0.0.5: fat-image records carry per-platform fingerprints; pick
-                # the one for this host's container platform. None if not recorded.
-                fingerprint_expected=_ledger_digest_for_this_host(resolve_match),
-                fingerprint_actual=_ledger_digest_for_this_host(resolve_match),
-                fingerprint_matched=True,
-                pre_exit_code=repro.pre_exit_code,
-                post_exit_code=repro.post_exit_code,
-                fix_exit_code=repro.fix_exit_code,
+                fat_image_tag=resolve_match.tag,
+                fingerprint=_ledger_digest_for_this_host(resolve_match),
+                repro=repro,
                 outcome_matched=repro.matches_category(discovered_category),
-                pre_log_path=repro.pre_log_path,
-                post_log_path=repro.post_log_path,
-                fix_log_path=repro.fix_log_path,
+                entry_id=entry_id,
             )
             if classification_dict is not None:
                 db.seed_classification_if_absent(
@@ -628,8 +786,115 @@ def process(candidate: dict, *, out_dir: Path, logs_dir: Path,
             rec.reason = f"regenerate exit={rc}"
             return rec
 
-    rec.status = Status.OK
+    # Preserve OK_AFTER_RELOCK if the relax-locked retry put us here.
+    # If the multi-attempt run flagged flakiness on either side, mark
+    # FLAKY so the headline can split stable from flaky reproductions.
+    # Otherwise canonical strict-contract OK.
+    if rec.status == Status.OK_AFTER_RELOCK:
+        pass
+    elif rec.flaky_pre or rec.flaky_post:
+        rec.status = Status.FLAKY
+    else:
+        rec.status = Status.OK
     return rec
+
+
+# ---- reclassify (post-hoc) --------------------------------------------------
+
+def _reclassify_mode(args) -> int:
+    """Re-apply Scheme-2 classification to an existing run's not_reproducible
+    rows. Reads `data/cargo-logs/<short>-pre.log`, runs `classify()`, upserts
+    the result. Idempotent — same primary key, ON CONFLICT DO UPDATE.
+
+    No reproduction is run; this is purely "the rules changed, update old
+    rows". The contract used to be a separate `scripts/reclassify_failures.py`
+    script; folding it into the driver keeps DB writes on one path and
+    populates the same Grafana dashboards as live runs.
+    """
+    if not args.db or not args.run_id:
+        print("ERROR: --reclassify requires both --db and --run-id",
+              file=sys.stderr)
+        return 2
+    # Logs live under <logs_dir>/<run_id>/ from May 2026 onward. Older
+    # runs put them in the flat <logs_dir>/. Prefer the per-run subdir
+    # when it exists; fall back to the flat directory.
+    logs_base = Path(args.logs_dir)
+    per_run_dir = logs_base / args.run_id
+    logs_dir = per_run_dir if per_run_dir.is_dir() else logs_base
+    if not logs_dir.is_dir():
+        print(f"ERROR: --logs-dir {logs_base} does not exist", file=sys.stderr)
+        return 2
+
+    # candidate_key -> post_commit[:8] for log lookup. The candidates JSONL
+    # is the same one the run was driven from; without it we can't map
+    # "owner/repo#42" back to its pre-log filename.
+    key_to_short: dict[str, str] = {}
+    with open(args.candidates) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            c = json.loads(line)
+            key_to_short[f"{c['repo']}#{c['pr_number']}"] = c["post_commit"][:8]
+
+    # The reproducer now writes <short>-<run_id>-pre.log when run_id is set.
+    # For backward compat with older runs (which used <short>-pre.log) we
+    # try the run-id-suffixed path first, then fall back. New runs benefit
+    # automatically; old runs keep working until the logs age out.
+    def _candidate_pre_log(short: str) -> Path | None:
+        suffixed = logs_dir / f"{short}-{args.run_id}-pre.log"
+        legacy = logs_dir / f"{short}-pre.log"
+        if suffixed.exists():
+            return suffixed
+        if legacy.exists():
+            return legacy
+        return None
+
+    db = PipelineDB(Path(args.db))
+    rows = db.conn.execute(
+        "SELECT candidate_key, status, reason FROM drive_state "
+        "WHERE run_id = ? AND status = ?",
+        (args.run_id, Status.NOT_REPRODUCIBLE),
+    ).fetchall()
+    print(f"reclassifying {len(rows)} not_reproducible row(s) "
+          f"from run={args.run_id}", file=sys.stderr)
+
+    counts: dict[str, int] = {}
+    for candidate_key, status, reason in rows:
+        ecc: dict[str, int] = {}
+        from_reason = _failure_classifier.classify_from_reason(reason)
+        if from_reason is not None:
+            cat, sub, ev = from_reason
+        else:
+            short = key_to_short.get(candidate_key)
+            if short is None:
+                cat, sub, ev = "OTHER", None, "post_commit not in candidates file"
+            else:
+                pre_log = _candidate_pre_log(short)
+                if pre_log is None:
+                    cat, sub, ev = "NO_LOG", None, f"no <short>-pre.log under {logs_dir}"
+                else:
+                    text = pre_log.read_text(errors="replace")
+                    if not text:
+                        cat, sub, ev = "NO_LOG", None, f"empty {pre_log.name}"
+                    else:
+                        cat, sub, ev, ecc = _failure_classifier.classify_full(text)
+        db.upsert_drive_state_classification(
+            run_id=args.run_id,
+            candidate_key=candidate_key,
+            category=cat,
+            subcategory=sub,
+            evidence=ev,
+            error_code_counts=ecc or None,
+        )
+        counts[cat] = counts.get(cat, 0) + 1
+
+    print(file=sys.stderr)
+    print(f"{'category':<25s} {'count':>7s}", file=sys.stderr)
+    print("-" * 36, file=sys.stderr)
+    for cat in sorted(counts, key=lambda c: -counts[c]):
+        print(f"{cat:<25s} {counts[cat]:>7d}", file=sys.stderr)
+    return 0
 
 
 # ---- main -------------------------------------------------------------------
@@ -698,7 +963,46 @@ def main() -> int:
                         "candidates reuse the cache, cutting network ~3-5×. "
                         "Pass empty string to disable. Default: data/cargo-cache/ "
                         "next to the state file.")
+    p.add_argument("--shuffle", action="store_true",
+                   help="Shuffle the to-do list before dispatch. Spreads "
+                        "expensive fork-clusters (libra/diem/solana family, "
+                        "or repos with N adjacent PRs that share heavy deps) "
+                        "across workers, stopping a single 30min linker from "
+                        "blocking N workers' progress while their similar "
+                        "candidates queue behind it. Resume-safe — shuffle "
+                        "happens after the skip-list filter, so already-done "
+                        "candidates are never re-shuffled in.")
+    p.add_argument("--shuffle-seed", type=int, default=None,
+                   help="Seed for --shuffle. Default: nondeterministic.")
+    p.add_argument("--attempts", type=int, default=1,
+                   help="Repeat each candidate's pre and post cargo-test "
+                        "invocations N times. With N>1, mixed pass/fail "
+                        "outcomes mark the candidate as ok_flaky / "
+                        "not_reproducible_flaky. Default 1 (single attempt). "
+                        "Wall clock multiplies roughly by N for the failure "
+                        "cohort and by N for the success cohort.")
+    p.add_argument("--relax-locked", action="store_true",
+                   help="On a not_reproducible outcome classified LOCK_FILE_STALE, "
+                        "retry once with `cargo generate-lockfile && cargo test "
+                        "--frozen` instead of --locked. Successful retries get "
+                        "status `ok_after_relock` (distinct from OK so the "
+                        "headline doesn't conflate strict-contract reproductions "
+                        "with lockfile-regenerated ones). Recovers ~25-35 of the "
+                        "40 LOCK_FILE_STALE candidates from ds1-full per the "
+                        "round-2 audit.")
+    p.add_argument("--reclassify", action="store_true",
+                   help="Post-hoc re-classification mode. Skips reproduction "
+                        "entirely; iterates over the existing run's "
+                        "drive_state rows, re-reads each candidate's "
+                        "<short>-pre.log under --logs-dir, runs Scheme-2 "
+                        "classify(), and upserts drive_state_classifications. "
+                        "Used to apply newer classifier rules to an old run "
+                        "without re-running cargo. Requires --db, --run-id, "
+                        "--candidates, --logs-dir.")
     args = p.parse_args()
+
+    if args.reclassify:
+        return _reclassify_mode(args)
 
     max_sde_date = args.max_sde_date or _fat.default_max_sde_date()
     print(f"max_sde_date (run parameter): {max_sde_date}", file=sys.stderr)
@@ -711,9 +1015,22 @@ def main() -> int:
         return 2
 
     out_dir = Path(args.out_dir)
-    logs_dir = Path(args.logs_dir)
     state_path = Path(args.state)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Logs go under <logs_dir>/<run_id>/ so each run's per-candidate
+    # pre/post log files live in their own subdirectory. Previously every
+    # run's logs piled into a single flat directory; with run-id-suffixed
+    # filenames that was at least no-overwrite-safe, but it scaled to ~5k
+    # files per run and made forensic auditing painful (which run did this
+    # log come from?). Per-run subdirs make `ls`+`grep` workable and let
+    # you tar up a run cleanly. Resolve run_id early so the path is final
+    # before any worker writes.
+    host_for_run = args.host or socket.gethostname()
+    run_id_resolved = args.run_id or (
+        f"drive-{host_for_run}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    )
+    logs_dir = Path(args.logs_dir) / run_id_resolved
 
     # Cargo cache: set the env var `_reproducer` reads. Create dir now so the
     # first worker doesn't race on mkdir; chmod 0777 so containers running
@@ -747,11 +1064,10 @@ def main() -> int:
     run_id: str | None = None
     if args.db:
         db = PipelineDB(Path(args.db))
-        host = args.host or socket.gethostname()
-        run_id = args.run_id or f"drive-{host}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        run_id = run_id_resolved
         db.start_run(
             run_id=run_id,
-            host=host,
+            host=host_for_run,
             git_sha=_git_sha(),
             candidates_source=str(Path(args.candidates).resolve()),
             max_sde_date=max_sde_date,
@@ -773,6 +1089,20 @@ def main() -> int:
             todo.append(candidate)
             if args.limit and len(todo) >= args.limit:
                 break
+
+    # Shuffling spreads expensive fork-clusters (libra/diem/solana, plus
+    # repos with N adjacent PRs that share a workspace) across the workers
+    # instead of clumping them at the alphabetical-order JSONL slice. Big
+    # impact on wall-clock when --parallel > 1: stops a single 30min
+    # libra build from blocking 5 workers' progress while their own
+    # libra-family candidates queue behind it.
+    if args.shuffle:
+        import random
+        rng = random.Random(args.shuffle_seed) if args.shuffle_seed else random.Random()
+        rng.shuffle(todo)
+        print(f"shuffled {len(todo)} candidates "
+              f"(seed={args.shuffle_seed if args.shuffle_seed else 'random'})",
+              file=sys.stderr)
 
     # --- Preflight: every to-be-run candidate's canonical fat-image tag
     # must already be built locally. Without this, `docker run <tag>`
@@ -844,6 +1174,8 @@ def main() -> int:
             run_id=run_id,
             db_lock=db_lock,
             force_fat_image=args.force_fat_image,
+            relax_locked=args.relax_locked,
+            attempts=args.attempts,
         )
         # If shutdown fired mid-reproduction, the docker process was killed
         # and we got a partial/failed rec. Don't persist — resume re-tries.
